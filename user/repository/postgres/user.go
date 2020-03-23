@@ -17,20 +17,12 @@ type User struct {
 	Nickname string
 }
 
-func toPostgresUser(user models.User) *User {
+func toPostgres(user models.User) *User {
 	return &User{
 		About:    user.About,
 		Email:    user.Email,
 		FullName: user.FullName,
 		Nickname: user.Nickname,
-	}
-}
-
-func toPostgresUserUpdate(user models.UserUpdate) *User {
-	return &User{
-		About:    user.About,
-		Email:    user.Email,
-		FullName: user.FullName,
 	}
 }
 
