@@ -1,8 +1,8 @@
 package models
 
 type User struct {
-	About string `json:"about"`
-	Email string `json:"email"`
-	FullName string `json:"fullname"`
-	Nickname string `json:"nickname"`
+	About string `json:"about,omitempty"`
+	Email string `json:"email,omitempty"`
+	FullName string `json:"fullname,omitempty"`
+	Nickname string `json:"nickname,omitempty"`
 }

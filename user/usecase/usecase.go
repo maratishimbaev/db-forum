@@ -1,4 +1,4 @@
-package usecase
+package userUseCase
 
 import (
 	"forum/models"
@@ -7,6 +7,10 @@ import (
 
 type UseCase struct {
 	repository user.Repository
+}
+
+func NewUseCase(repository user.Repository) *UseCase {
+	return &UseCase{repository}
 }
 
 func (u *UseCase) CreateUser(newUser *models.User) (user models.User, err error) {
