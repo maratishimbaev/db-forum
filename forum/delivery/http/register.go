@@ -1,4 +1,4 @@
-package http
+package forumHttp
 
 import (
 	"forum/forum"
@@ -9,5 +9,5 @@ func RegisterHTTPEndpoints(router *gin.Engine, u forum.UseCase) {
 	h := NewHandler(u)
 
 	router.POST("/forum/create", h.CreateForum)
-	router.POST("/forum/:slug/detail")
+	router.GET("/forum/:slug/details", h.GetForum)
 }
