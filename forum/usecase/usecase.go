@@ -1,4 +1,4 @@
-package usecase
+package forumUseCase
 
 import (
 	"forum/forum"
