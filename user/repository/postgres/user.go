@@ -1,13 +1,16 @@
-package postgres
+package userPostgres
 
 import (
+	"database/sql"
 	"forum/models"
 )
 
-type Repository struct {}
+type Repository struct {
+	DB *sql.DB
+}
 
-func NewRepository() *Repository {
-	return &Repository{}
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{DB: db}
 }
 
 type User struct {
@@ -36,13 +39,37 @@ func toModel(user User) *models.User {
 }
 
 func (r *Repository) CreateUser(newUser *models.User) (user models.User, err error) {
-	return user, err
+	createUser := `INSERT INTO "user" (about, email, fullname, nickname)
+				   VALUES ($1, $2, $3, $4)`
+	_, err = r.DB.Exec(createUser, newUser.About, newUser.Email, newUser.FullName, newUser.Nickname)
+	if err != nil {
+		return user, err
+	}
+
+	return *newUser, err
 }
 
 func (r *Repository) GetUser(nickname string) (user models.User, err error) {
-	return user ,err
+	user.Nickname = nickname
+
+	getUser := `SELECT about, email, fullname
+			   FROM "user" WHERE nickname = $1`
+	err = r.DB.QueryRow(getUser, user.Nickname).Scan(&user.About, &user.Email, &user.FullName)
+	if err != nil {
+		return user, err
+	}
+
+	return user, err
 }
 
 func (r *Repository) ChangeUser(newUser *models.User) (user models.User, err error) {
-	return user, err
+	changeUser := `UPDATE "user"
+				   SET about = $1, email = $2, fullname = $3
+				   WHERE nickname = $4`
+	_, err = r.DB.Exec(changeUser, newUser.About, newUser.Email, newUser.FullName, newUser.Nickname)
+	if err != nil {
+		return user, err
+	}
+
+	return *newUser, nil
 }
