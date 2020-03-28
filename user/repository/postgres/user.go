@@ -78,19 +78,3 @@ func (r *Repository) ChangeUser(newUser *models.User) (user models.User, err err
 
 	return *toModel(&pgUser), nil
 }
-
-func (r *Repository) GetUserIDByNickname(nickname string) (id uint64, err error) {
-	getUserID := `SELECT id
-				  FROM "user" WHERE nickname = $1`
-	err = r.DB.QueryRow(getUserID, nickname).Scan(&id)
-
-	return id, err
-}
-
-func (r *Repository) GetUserNicknameByID(id uint64) (nickname string, err error) {
-	getUserNickname := `SELECT nickname
-					   FROM "user" WHERE id = $1`
-	err = r.DB.QueryRow(getUserNickname, id).Scan(&nickname)
-
-	return nickname, err
-}

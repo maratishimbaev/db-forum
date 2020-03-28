@@ -4,14 +4,19 @@ import (
 	"database/sql"
 	"fmt"
 	"forum/forum"
-	forumHttp "forum/forum/delivery/http"
-	forumPostgres "forum/forum/repository/postgres"
-	forumUseCase "forum/forum/usecase"
+	"forum/forum/delivery/http"
+	"forum/forum/repository/postgres"
+	"forum/forum/usecase"
+	"forum/thread"
+	"forum/thread/delivery/http"
+	"forum/thread/repository/postgres"
+	"forum/thread/usecase"
 	"forum/user"
 	"forum/user/delivery/http"
 	"forum/user/repository/postgres"
 	"forum/user/usecase"
-	"github.com/gin-gonic/gin"
+	"github.com/labstack/echo"
+	"github.com/labstack/echo/middleware"
 	_ "github.com/lib/pq"
 	"log"
 	"net/http"
@@ -21,17 +26,20 @@ import (
 type App struct {
 	userUseCase user.UseCase
 	forumUseCase forum.UseCase
+	threadUseCase thread.UseCase
 }
 
 func NewApp() *App {
 	db := initDB()
 
 	userRepository := userPostgres.NewRepository(db)
-	forumRepository := forumPostgres.NewRepository(db, userRepository)
+	forumRepository := forumPostgres.NewRepository(db)
+	threadRepository := threadPostgres.NewRepository(db)
 
 	return &App{
 		userUseCase: userUseCase.NewUseCase(userRepository),
 		forumUseCase: forumUseCase.NewUseCase(forumRepository),
+		threadUseCase: threadUsecase.NewUseCase(threadRepository),
 	}
 }
 
@@ -55,10 +63,15 @@ func initDB() *sql.DB {
 }
 
 func (a *App) Run() (err error) {
-	router := gin.Default()
+	e := echo.New()
 
-	userHttp.RegisterHTTPEndpoints(router, a.userUseCase)
-	forumHttp.RegisterHTTPEndpoints(router, a.forumUseCase)
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Format: "method=${method}, uri=${uri}, status=${status}\n",
+	}))
 
-	return http.ListenAndServe(":8000", router)
+	userHttp.RegisterHTTPEndpoints(e, a.userUseCase)
+	forumHttp.RegisterHTTPEndpoints(e, a.forumUseCase)
+	threadHttp.RegisterHTTPEndpoints(e, a.threadUseCase)
+
+	return http.ListenAndServe(":8000", e)
 }

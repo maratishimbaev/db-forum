@@ -2,10 +2,10 @@ package userHttp
 
 import (
 	"forum/user"
-	"github.com/gin-gonic/gin"
+	"github.com/labstack/echo"
 )
 
-func RegisterHTTPEndpoints(router *gin.Engine, u user.UseCase) {
+func RegisterHTTPEndpoints(router *echo.Echo, u user.UseCase) {
 	h := NewHandler(u)
 
 	router.POST("/user/:nickname/create", h.CreateUser)
