@@ -2,10 +2,10 @@ package forumHttp
 
 import (
 	"forum/forum"
-	"github.com/gin-gonic/gin"
+	"github.com/labstack/echo"
 )
 
-func RegisterHTTPEndpoints(router *gin.Engine, u forum.UseCase) {
+func RegisterHTTPEndpoints(router *echo.Echo, u forum.UseCase) {
 	h := NewHandler(u)
 
 	router.POST("/forum/create", h.CreateForum)

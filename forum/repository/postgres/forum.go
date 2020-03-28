@@ -3,19 +3,14 @@ package forumPostgres
 import (
 	"database/sql"
 	"forum/models"
-	"forum/user"
 )
 
 type Repository struct {
 	DB *sql.DB
-	userRepository user.Repository
 }
 
-func NewRepository(db *sql.DB, userRepository user.Repository) *Repository {
-	return &Repository{
-		DB: db,
-		userRepository: userRepository,
-	}
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{DB: db}
 }
 
 type Forum struct {
@@ -26,8 +21,9 @@ type Forum struct {
 }
 
 func (r *Repository) toPostgres(forum *models.Forum) *Forum {
-	userID, err := r.userRepository.GetUserIDByNickname(forum.User)
-	if err != nil {
+	var userID uint64
+	getUserID := `SELECT id FROM "user" WHERE nickname = $1`
+	if err := r.DB.QueryRow(getUserID, forum.User).Scan(&userID); err != nil {
 		userID = 0
 	}
 
@@ -39,8 +35,9 @@ func (r *Repository) toPostgres(forum *models.Forum) *Forum {
 }
 
 func (r *Repository) toModel(forum *Forum) *models.Forum {
-	userNickname, err := r.userRepository.GetUserNicknameByID(forum.User)
-	if err != nil {
+	var userNickname string
+	getUserNickname := `SELECT nickname FROM "user" WHERE id = $1`
+	if err := r.DB.QueryRow(getUserNickname, forum.User).Scan(&userNickname); err != nil {
 		userNickname = ""
 	}
 

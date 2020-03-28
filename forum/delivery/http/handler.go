@@ -3,7 +3,7 @@ package forumHttp
 import (
 	"forum/forum"
 	"forum/models"
-	"github.com/gin-gonic/gin"
+	"github.com/labstack/echo"
 	"net/http"
 )
 
@@ -15,37 +15,34 @@ func NewHandler(useCase forum.UseCase) *Handler {
 	return &Handler{useCase: useCase}
 }
 
-func (h *Handler) CreateForum(c *gin.Context) {
+func (h *Handler) CreateForum(c echo.Context) (err error) {
 	var newForum models.Forum
 
-	if err := c.BindJSON(&newForum); err != nil {
-		c.JSON(http.StatusBadRequest, models.Error{
+	if err := c.Bind(&newForum); err != nil {
+		return c.JSON(http.StatusBadRequest, models.Error{
 			Message: err.Error(),
 		})
-		return
 	}
 
 	forum, err := h.useCase.CreateForum(&newForum)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.Error{
+		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
-		return
 	}
 
-	c.JSON(http.StatusOK, forum)
+	return c.JSON(http.StatusOK, forum)
 }
 
-func (h *Handler) GetForum(c *gin.Context) {
+func (h *Handler) GetForum(c echo.Context) (err error) {
 	slug := c.Param("slug")
 
 	forum, err := h.useCase.GetForum(slug)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.Error{
+		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
-		return
 	}
 
-	c.JSON(http.StatusOK, forum)
+	return c.JSON(http.StatusOK, forum)
 }
