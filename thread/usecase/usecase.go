@@ -24,3 +24,11 @@ func (u *UseCase) GetThreads(slug string, limit uint64, since string, desc bool)
 func (u *UseCase) GetThread(slugOrID string) (thread models.Thread, err error) {
 	return u.repository.GetThread(slugOrID)
 }
+
+func (u *UseCase) ChangeThread(slugOrID string, newThread *models.Thread) (thread models.Thread, err error) {
+	return u.repository.ChangeThread(slugOrID, newThread)
+}
+
+func (u *UseCase) VoteThread(slugOrID string, vote models.Vote) (thread models.Thread, err error) {
+	return u.repository.VoteThread(slugOrID, vote)
+}
