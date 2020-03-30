@@ -75,3 +75,47 @@ func (h *Handler) GetThread(c echo.Context) (err error) {
 
 	return c.JSON(http.StatusOK, thread)
 }
+
+func (h *Handler) ChangeThread(c echo.Context) (err error) {
+	var newThread models.Thread
+
+	if err = c.Bind(&newThread); err != nil {
+		return c.JSON(http.StatusBadRequest, models.Error{
+			Message: err.Error(),
+		})
+	}
+
+	thread, err := h.useCase.ChangeThread(
+		c.Param("slug_or_id"),
+		&newThread,
+	)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, models.Error{
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, thread)
+}
+
+func (h *Handler) VoteThread(c echo.Context) (err error) {
+	var newVote models.Vote
+
+	if err = c.Bind(&newVote); err != nil {
+		return c.JSON(http.StatusBadRequest, models.Error{
+			Message: err.Error(),
+		})
+	}
+
+	thread, err := h.useCase.VoteThread(
+		c.Param("slug_or_id"),
+		newVote,
+	)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, models.Error{
+			Message: err.Error(),
+		})
+	}
+
+	return c.JSON(http.StatusOK, thread)
+}
