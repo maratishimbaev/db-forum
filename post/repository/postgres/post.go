@@ -97,18 +97,7 @@ func (r *Repository) toModelFull(author *userPostgres.User,
 		threadAuthorNickname = ""
 	}
 
-	return &models.PostFull{
-		Author: models.User{
-			About:    author.About,
-			Email:    author.Email,
-			FullName: author.FullName,
-			Nickname: author.Nickname,
-		},
-		Forum: models.Forum{
-			Slug:  forum.Slug,
-			Title: forum.Title,
-			User:  forumUserNickname,
-		},
+	postFull := models.PostFull{
 		Post: models.Post{
 			Author:   author.Nickname,
 			Created:  post.Created,
@@ -119,7 +108,27 @@ func (r *Repository) toModelFull(author *userPostgres.User,
 			Parent:   post.Parent,
 			Thread:   thread.ID,
 		},
-		Thread: models.Thread{
+	}
+
+	if *author != (userPostgres.User{}) {
+		postFull.Author = &models.User{
+			About:    author.About,
+			Email:    author.Email,
+			FullName: author.FullName,
+			Nickname: author.Nickname,
+		}
+	}
+
+	if *forum != (forumPostgres.Forum{}) {
+		postFull.Forum = &models.Forum{
+			Slug:  forum.Slug,
+			Title: forum.Title,
+			User:  forumUserNickname,
+		}
+	}
+
+	if *thread != (threadPostgres.Thread{}) {
+		postFull.Thread = &models.Thread{
 			Author:  threadAuthorNickname,
 			Created: thread.Created,
 			Forum:   forum.Slug,
@@ -127,8 +136,19 @@ func (r *Repository) toModelFull(author *userPostgres.User,
 			Message: thread.Message,
 			Slug:    thread.Slug,
 			Title:   thread.Title,
-		},
+		}
 	}
+
+	return &postFull
+}
+
+func contains(slice []string, searchable string) bool {
+	for _, el := range slice {
+		if el == searchable {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Repository) GetPostFull(id uint64, related []string) (postFull models.PostFull, err error) {
@@ -141,33 +161,43 @@ func (r *Repository) GetPostFull(id uint64, related []string) (postFull models.P
 		return postFull, err
 	}
 
-	author := userPostgres.User{ID: post.Author}
+	var author userPostgres.User
+	authorContains := contains(related, "author")
+	if authorContains {
+		author.ID = post.Author
 
-	getAuthor := `SELECT about, email, fullname, nickname
-				  FROM "user" WHERE id = $1`
-	if err = r.DB.QueryRow(getAuthor, author.ID).
-				  Scan(&author.About, &author.Email, &author.FullName, &author.Nickname); err != nil {
-		return postFull, err
+		getAuthor := `SELECT about, email, fullname, nickname
+				  	  FROM "user" WHERE id = $1`
+		if err = r.DB.QueryRow(getAuthor, author.ID).
+			Scan(&author.About, &author.Email, &author.FullName, &author.Nickname); err != nil {
+			return postFull, err
+		}
 	}
 
-	forum := forumPostgres.Forum{ID: post.Forum}
+	var forum forumPostgres.Forum
+	forumContains := contains(related, "forum")
+	if forumContains {
+		forum.ID = post.Forum
 
-	getForum := `SELECT slug, title, "user"
-				 FROM forum WHERE id = $1`
-	if err = r.DB.QueryRow(getForum, forum.ID).Scan(&forum.Slug, &forum.Title, &forum.User); err != nil {
-		return postFull, err
+		getForum := `SELECT slug, title, "user"
+				 	 FROM forum WHERE id = $1`
+		if err = r.DB.QueryRow(getForum, forum.ID).Scan(&forum.Slug, &forum.Title, &forum.User); err != nil {
+			return postFull, err
+		}
 	}
 
-	thread := threadPostgres.Thread{ID: post.Thread}
+	var thread threadPostgres.Thread
+	threadContains := contains(related, "thread")
+	if threadContains {
+		thread.ID = post.Thread
 
-	getThread := `SELECT author, created, forum, message, slug, title
-				  FROM thread WHERE id = $1`
-	if err = r.DB.QueryRow(getThread, thread.ID).
-				  Scan(&thread.Author, &thread.Created, &thread.Forum, &thread.Message, &thread.Slug, &thread.Title); err != nil {
-		return postFull, err
+		getThread := `SELECT author, created, forum, message, slug, title
+				  	  FROM thread WHERE id = $1`
+		if err = r.DB.QueryRow(getThread, thread.ID).
+			Scan(&thread.Author, &thread.Created, &thread.Forum, &thread.Message, &thread.Slug, &thread.Title); err != nil {
+			return postFull, err
+		}
 	}
-
-	// TODO: related param
 
 	return *r.toModelFull(&author, &forum, &post, &thread), err
 }

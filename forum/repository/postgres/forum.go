@@ -48,32 +48,52 @@ func (r *Repository) toModel(forum *Forum) *models.Forum {
 	}
 }
 
+func (r *Repository) GetPostCount(forumID uint64) (postCount uint64, err error) {
+	countPosts := `SELECT COUNT(*) FROM post WHERE forum = $1`
+	err = r.DB.QueryRow(countPosts, forumID).Scan(&postCount)
+
+	return postCount, err
+}
+
+func (r *Repository) GetThreadCount(forumID uint64) (threadCount uint64, err error) {
+	countThreads := `SELECT COUNT(*) FROM thread WHERE forum = $1`
+	err = r.DB.QueryRow(countThreads, forumID).Scan(&threadCount)
+
+	return threadCount, err
+}
+
 func (r *Repository) CreateForum(newForum *models.Forum) (forum models.Forum, err error) {
 	pgForum := r.toPostgres(newForum)
 
 	createForum := `INSERT INTO forum (slug, title, "user")
-					VALUES ($1, $2, $3)`
-	_, err = r.DB.Exec(createForum, pgForum.Slug, pgForum.Title, pgForum.User)
+					VALUES ($1, $2, $3) RETURNING id`
+	err = r.DB.QueryRow(createForum, pgForum.Slug, pgForum.Title, pgForum.User).Scan(&pgForum.ID)
 	if err != nil {
 		return forum, err
 	}
 
-	// TODO: posts and threads fields
+	forum = *r.toModel(pgForum)
 
-	return *r.toModel(pgForum), err
+	forum.Posts, err = r.GetPostCount(pgForum.ID)
+	forum.Threads, err = r.GetThreadCount(pgForum.ID)
+
+	return forum, err
 }
 
 func (r *Repository) GetForum(slug string) (forum models.Forum, err error) {
 	pgForum := Forum{Slug: slug}
 
-	getForum := `SELECT title, "user"
+	getForum := `SELECT id, title, "user"
 				 FROM forum WHERE slug = $1`
-	err = r.DB.QueryRow(getForum, pgForum.Slug).Scan(&pgForum.Title, &pgForum.User)
+	err = r.DB.QueryRow(getForum, pgForum.Slug).Scan(&pgForum.ID, &pgForum.Title, &pgForum.User)
 	if err != nil {
 		return forum, err
 	}
 
-	// TODO: posts and threads fields
+	forum = *r.toModel(&pgForum)
 
-	return *r.toModel(&pgForum), err
+	forum.Posts, err = r.GetPostCount(pgForum.ID)
+	forum.Threads, err = r.GetThreadCount(pgForum.ID)
+
+	return forum, err
 }
