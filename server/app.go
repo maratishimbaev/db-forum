@@ -11,6 +11,10 @@ import (
 	postHttp "forum/post/delivery/http"
 	postPostgres "forum/post/repository/postgres"
 	postUseCase "forum/post/usecase"
+	"forum/service"
+	serviceHttp "forum/service/delivery/http"
+	servicePostgres "forum/service/repository/postgres"
+	serviceUsecase "forum/service/usecase"
 	"forum/thread"
 	"forum/thread/delivery/http"
 	"forum/thread/repository/postgres"
@@ -32,6 +36,7 @@ type App struct {
 	forumUseCase forum.UseCase
 	threadUseCase thread.UseCase
 	postUseCase post.UseCase
+	serviceUseCase service.UseCase
 }
 
 func NewApp() *App {
@@ -41,12 +46,14 @@ func NewApp() *App {
 	forumRepository := forumPostgres.NewRepository(db)
 	threadRepository := threadPostgres.NewRepository(db)
 	postRepository := postPostgres.NewRepository(db)
+	serviceRepository := servicePostgres.NewRepository(db)
 
 	return &App{
 		userUseCase: userUseCase.NewUseCase(userRepository),
 		forumUseCase: forumUseCase.NewUseCase(forumRepository),
 		threadUseCase: threadUsecase.NewUseCase(threadRepository),
 		postUseCase: postUseCase.NewUseCase(postRepository),
+		serviceUseCase: serviceUsecase.NewUseCase(serviceRepository),
 	}
 }
 
@@ -80,6 +87,7 @@ func (a *App) Run() (err error) {
 	forumHttp.RegisterHTTPEndpoints(e, a.forumUseCase)
 	threadHttp.RegisterHTTPEndpoints(e, a.threadUseCase)
 	postHttp.RegisterHTTPEndpoints(e, a.postUseCase)
+	serviceHttp.RegisterHTTPEndpoints(e, a.serviceUseCase)
 
 	return http.ListenAndServe(":8000", e)
 }
