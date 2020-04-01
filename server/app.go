@@ -89,5 +89,5 @@ func (a *App) Run() (err error) {
 	postHttp.RegisterHTTPEndpoints(e, a.postUseCase)
 	serviceHttp.RegisterHTTPEndpoints(e, a.serviceUseCase)
 
-	return http.ListenAndServe(":8000", e)
+	return http.ListenAndServe(":5000", e)
 }
