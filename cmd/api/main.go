@@ -6,6 +6,8 @@ import (
 )
 
 func main() {
+	log.Printf("Server started")
+
 	app := server.NewApp()
 
 	if err := app.Run(); err != nil {
