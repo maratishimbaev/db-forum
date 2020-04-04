@@ -98,7 +98,7 @@ func (h *Handler) CreatePosts(c echo.Context) (err error) {
 			Message: err.Error(),
 		})
 	case nil:
-		return c.JSON(http.StatusOK, posts)
+		return c.JSON(http.StatusCreated, posts)
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),

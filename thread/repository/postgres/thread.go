@@ -228,10 +228,29 @@ func (r *Repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 		}
 	}
 
-	changeThread := `UPDATE thread
+	var oldThread Thread
+
+	getOldThread := `SELECT message, title FROM thread WHERE id = $1`
+	err = r.DB.QueryRow(getOldThread, threadID).Scan(oldThread)
+	if err != nil {
+		return thread, err
+	}
+
+	if newThread.Message == "" && newThread.Title == "" {
+		return models.Thread{}, err
+	} else {
+		if newThread.Message == "" {
+			newThread.Message = oldThread.Message
+		}
+		if newThread.Title == "" {
+			newThread.Title = oldThread.Title
+		}
+
+		changeThread := `UPDATE thread
 					 SET message = $1, title = $2
 					 WHERE id = $3`
-	_, err = r.DB.Exec(changeThread, newThread.Message, newThread.Title, threadID)
+		_, err = r.DB.Exec(changeThread, newThread.Message, newThread.Title, threadID)
+	}
 
 	var pgThread Thread
 
