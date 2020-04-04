@@ -217,20 +217,30 @@ func (r *Repository) ChangePost(newPost *models.Post) (post models.Post, err err
 	return post, err
 }
 
-func (r *Repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
-	var threadID string
-
+func (r *Repository) GetThreadID(threadSlugOrID string) (threadID uint64, err error) {
 	var isThreadID bool
 	checkThreadID := `SELECT COUNT(*) <> 0 FROM thread WHERE id = $1`
 	_ = r.DB.QueryRow(checkThreadID, threadSlugOrID).Scan(&isThreadID)
 
 	if isThreadID {
-		threadID = threadSlugOrID
+		threadID, err = strconv.ParseUint(threadSlugOrID, 10, 64)
+		if err != nil {
+			return threadID, err
+		}
 	} else {
 		getThreadID := `SELECT id FROM thread WHERE slug = $1`
 		if err = r.DB.QueryRow(getThreadID, threadSlugOrID).Scan(&threadID); err != nil {
-			return posts, _post.NewThreadNotFound(threadSlugOrID)
+			return threadID, _post.NewThreadNotFound(threadSlugOrID)
 		}
+	}
+
+	return threadID, err
+}
+
+func (r *Repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
+	threadID, err := r.GetThreadID(threadSlugOrID)
+	if err != nil {
+		return posts, err
 	}
 
 	getThread := `SELECT thread FROM post WHERE id = $1`
@@ -246,7 +256,7 @@ func (r *Repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 
 		now := time.Now()
 
-		newPost.Thread, err = strconv.ParseUint(threadID, 10, 64)
+		newPost.Thread = threadID
 		if err != nil {
 			return posts, err
 		}
@@ -274,40 +284,175 @@ func (r *Repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	return posts, err
 }
 
-func (r *Repository) GetThreadPosts(threadSlugOrID string, limit, since uint64, sort string, desc bool) (posts []models.Post, err error) {
-	var threadID uint64
+func (r *Repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
+	getPosts := `
+		SELECT id, author, created, forum, is_edited, message, parent 
+		FROM post WHERE thread = $1 AND id > $2 ORDER BY created`
 
-	var isThreadID bool
-	checkThreadID := `SELECT COUNT(*) <> 0 FROM thread WHERE id = $1`
-	err = r.DB.QueryRow(checkThreadID, threadSlugOrID).Scan(&isThreadID)
-
-	if isThreadID {
-		if threadID, err = strconv.ParseUint(threadSlugOrID, 10, 64); err != nil {
-			return posts, err
-		}
-	} else {
-		getThreadID := `SELECT id FROM thread WHERE slug = $1`
-		if err = r.DB.QueryRow(getThreadID, threadSlugOrID).Scan(&threadID); err != nil {
-			return posts, _post.NewThreadNotFound(threadSlugOrID)
-		}
+	if desc {
+		getPosts = getPosts + " DESC"
 	}
 
-	getThreads := `SELECT id, author, created, forum, is_edited, message, parent
-				   FROM post WHERE thread = $1`
-	rows, err := r.DB.Query(getThreads, threadID)
+	var parentRows *sql.Rows
+
+	if limit == 0 {
+		parentRows, err = r.DB.Query(getPosts, threadID, since)
+	} else {
+		getPosts = getPosts + " LIMIT $3"
+
+		parentRows, err = r.DB.Query(getPosts, threadID, since, limit)
+	}
+
 	if err != nil {
 		return posts, err
 	}
 
-	for rows.Next() {
+	for parentRows.Next() {
 		post := Post{Thread: threadID}
 
-		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
+		err = parentRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
+		if err != nil {
+			return posts, err
+		}
 
 		posts = append(posts, *r.toModel(&post))
 	}
 
-	// TODO: limit, since, sort, desc params
+	return posts, err
+}
+
+func (r *Repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
+	getParentPosts := `SELECT id FROM post WHERE thread = $1 AND parent = 0 AND id > $2 ORDER BY created`
+
+	if desc {
+		getParentPosts = getParentPosts + " DESC"
+	}
+
+	var parentRows *sql.Rows
+
+	if limit == 0 {
+		parentRows, err = r.DB.Query(getParentPosts, threadID, since)
+	} else {
+		getParentPosts = getParentPosts + " LIMIT $3"
+
+		parentRows, err = r.DB.Query(getParentPosts, threadID, since, limit)
+	}
+
+	if err != nil {
+		return posts, err
+	}
+
+	getChildPosts := `
+		WITH RECURSIVE children (id, author, created, forum, is_edited, message, parent) AS (
+			SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent
+			FROM post p WHERE p.id = $1
+		UNION ALL
+			SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent
+			FROM post p, children c
+			WHERE p.parent = c.id
+		) SELECT * FROM children`
+
+	var postCount uint64
+
+	for parentRows.Next() && (limit == 0 || postCount < limit) {
+		var parentID uint64
+
+		err = parentRows.Scan(&parentID)
+		if err != nil {
+			return posts, err
+		}
+
+		childRows, err := r.DB.Query(getChildPosts, parentID)
+		if err != nil {
+			return posts, err
+		}
+
+		for childRows.Next() && (limit == 0 || postCount < limit) {
+			post := Post{Thread: threadID}
+
+			err = childRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
+			if err != nil {
+				return posts, err
+			}
+
+			posts = append(posts, *r.toModel(&post))
+			postCount++
+		}
+	}
 
 	return posts, err
+}
+
+func (r *Repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
+	getParentPosts := `SELECT id FROM post WHERE thread = $1 AND parent = 0 AND id > $2 ORDER BY created`
+
+	if desc {
+		getParentPosts = getParentPosts + " DESC"
+	}
+
+	var parentRows *sql.Rows
+
+	if limit == 0 {
+		parentRows, err = r.DB.Query(getParentPosts, threadID, since)
+	} else {
+		getParentPosts = getParentPosts + " LIMIT $3"
+
+		parentRows, err = r.DB.Query(getParentPosts, threadID, since, limit)
+	}
+
+	if err != nil {
+		return posts, err
+	}
+
+	getChildPosts := `
+		WITH RECURSIVE children (id, author, created, forum, is_edited, message, parent) AS (
+			SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent
+			FROM post p WHERE p.id = $1
+		UNION ALL
+			SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent
+			FROM post p, children c
+			WHERE p.parent = c.id
+		) SELECT * FROM children`
+
+	for parentRows.Next() {
+		var parentID uint64
+
+		err = parentRows.Scan(&parentID)
+		if err != nil {
+			return posts, err
+		}
+
+		childRows, err := r.DB.Query(getChildPosts, parentID)
+		if err != nil {
+			return posts, err
+		}
+
+		for childRows.Next() {
+			post := Post{Thread: threadID}
+
+			err = childRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
+			if err != nil {
+				return posts, err
+			}
+
+			posts = append(posts, *r.toModel(&post))
+		}
+	}
+
+	return posts, err
+}
+
+func (r *Repository) GetThreadPosts(threadSlugOrID string, limit, since uint64, sort string, desc bool) (posts []models.Post, err error) {
+	threadID, err := r.GetThreadID(threadSlugOrID)
+	if err != nil {
+		return posts, err
+	}
+
+	if sort == "tree" {
+		return r.GetTreeSortPosts(threadID, limit, since, desc)
+	} else if sort == "parent_tree" {
+		return r.GetParentTreeSortPosts(threadID, limit, since, desc)
+	}
+
+	return r.GetFlatSortPosts(threadID, limit, since, desc)
 }

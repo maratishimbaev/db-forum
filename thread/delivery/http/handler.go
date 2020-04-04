@@ -1,7 +1,6 @@
 package threadHttp
 
 import (
-	"forum/forum"
 	"forum/models"
 	_thread "forum/thread"
 	"github.com/labstack/echo"
