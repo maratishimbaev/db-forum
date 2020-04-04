@@ -32,7 +32,7 @@ func (h *Handler) CreateUser(c echo.Context) (err error) {
 	case *_user.AlreadyExists:
 		return c.JSON(http.StatusConflict, users)
 	case nil:
-		return c.JSON(http.StatusOK, users[0])
+		return c.JSON(http.StatusCreated, users[0])
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),

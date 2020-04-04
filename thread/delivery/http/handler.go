@@ -36,7 +36,7 @@ func (h *Handler) CreateThread(c echo.Context) (err error) {
 	case *_thread.AlreadyExists:
 		return c.JSON(http.StatusConflict, thread)
 	case nil:
-		return c.JSON(http.StatusOK, thread)
+		return c.JSON(http.StatusCreated, thread)
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),

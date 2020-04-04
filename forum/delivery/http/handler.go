@@ -33,7 +33,7 @@ func (h *Handler) CreateForum(c echo.Context) (err error) {
 	case *_forum.AlreadyExits:
 		return c.JSON(http.StatusConflict, forum)
 	case nil:
-		return c.JSON(http.StatusOK, forum)
+		return c.JSON(http.StatusCreated, forum)
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),

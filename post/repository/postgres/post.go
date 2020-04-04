@@ -204,13 +204,27 @@ func (r *Repository) GetPostFull(id uint64, related []string) (postFull models.P
 }
 
 func (r *Repository) ChangePost(newPost *models.Post) (post models.Post, err error) {
-	changePost := `UPDATE post SET message = $1 WHERE id = $2`
-	if _, err = r.DB.Exec(changePost, newPost.Message, newPost.ID); err != nil {
-		return post, _post.NewNotFound(newPost.ID)
+	getPostMessage:= `SELECT message FROM post WHERE id = $1`
+
+	var oldPostMessage string
+
+	err = r.DB.QueryRow(getPostMessage, newPost.ID).Scan(&oldPostMessage)
+	if err != nil {
+		return post, err
 	}
 
-	getPost := `SELECT id, author, created, forum, is_edited, message, parent, thread
-				FROM post WHERE id = $1`
+	if oldPostMessage != "" {
+		changePost := `UPDATE post SET message = $1 WHERE id = $2`
+		if _, err = r.DB.Exec(changePost, newPost.Message, newPost.ID); err != nil {
+			return post, _post.NewNotFound(newPost.ID)
+		}
+	} else {
+		return models.Post{}, err
+	}
+
+	getPost := `
+		SELECT id, author, created, forum, is_edited, message, parent, thread
+		FROM post WHERE id = $1`
 	err = r.DB.QueryRow(getPost, newPost.ID).
 			   Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread)
 

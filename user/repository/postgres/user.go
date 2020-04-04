@@ -89,24 +89,56 @@ func (r *Repository) GetUser(nickname string) (user models.User, err error) {
 func (r *Repository) ChangeUser(newUser *models.User) (user models.User, err error) {
 	pgUser := *toPostgres(newUser)
 
-	changeUser := `UPDATE "user"
+	var oldUser User
+
+	getOldUser := `
+		SELECT about, email, fullname
+		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+	err = r.DB.QueryRow(getOldUser, newUser.Nickname).Scan(&oldUser)
+	if err != nil {
+		return user, err
+	}
+
+	if newUser.About == "" && newUser.Email == "" && newUser.FullName == "" {
+		return models.User{}, err
+	} else {
+		if newUser.About == "" {
+			newUser.About = oldUser.About
+		}
+		if newUser.Email == "" {
+			newUser.Email = oldUser.Email
+		}
+		if newUser.FullName == "" {
+			newUser.FullName = oldUser.FullName
+		}
+
+		changeUser := `UPDATE "user"
 				   SET about = $1, email = $2, fullname = $3
 				   WHERE LOWER(nickname) = LOWER($4)`
-	_, err = r.DB.Exec(changeUser, pgUser.About, pgUser.Email, pgUser.FullName, pgUser.Nickname)
-	if err != nil {
-		var userCount uint64
-
-		getUserCount := `SELECT COUNT(*) FROM "user" WHERE nickname = $1`
-		err = r.DB.QueryRow(getUserCount, newUser.Nickname).Scan(&userCount)
+		_, err = r.DB.Exec(changeUser, pgUser.About, pgUser.Email, pgUser.FullName, pgUser.Nickname)
 		if err != nil {
-			return user, err
-		}
+			var userCount uint64
 
-		if userCount == 0 {
-			return user, _user.NewNotFound(newUser.Nickname)
-		}
+			getUserCount := `SELECT COUNT(*) FROM "user" WHERE nickname = $1`
+			err = r.DB.QueryRow(getUserCount, newUser.Nickname).Scan(&userCount)
+			if err != nil {
+				return user, err
+			}
 
-		return user, _user.NewConflictData()
+			if userCount == 0 {
+				return user, _user.NewNotFound(newUser.Nickname)
+			}
+
+			return user, _user.NewConflictData()
+		}
+	}
+
+	getUser := `
+		SELECT about, email, fullname, nickname
+		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+	err = r.DB.QueryRow(getUser, newUser.Nickname).Scan(&pgUser.About, &pgUser.Email, &pgUser.FullName, &pgUser.Nickname)
+	if err != nil {
+		return user, err
 	}
 
 	return *toModel(&pgUser), nil
