@@ -2,17 +2,17 @@ package postHttp
 
 import (
 	"forum/models"
-	"forum/post"
+	_post "forum/post"
 	"github.com/labstack/echo"
 	"net/http"
 	"strconv"
 )
 
 type Handler struct {
-	useCase post.UseCase
+	useCase _post.UseCase
 }
 
-func NewHandler(useCase post.UseCase) *Handler {
+func NewHandler(useCase _post.UseCase) *Handler {
 	return &Handler{useCase: useCase}
 }
 
@@ -28,13 +28,18 @@ func (h *Handler) GetPostFull(c echo.Context) (err error) {
 		postID,
 		c.Request().URL.Query()["related"],
 	)
-	if err != nil {
+	switch err.(type) {
+	case *_post.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, post)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, post)
 }
 
 func (h *Handler) ChangePost(c echo.Context) (err error) {
@@ -56,13 +61,18 @@ func (h *Handler) ChangePost(c echo.Context) (err error) {
 	}
 
 	post, err := h.useCase.ChangePost(&newPost)
-	if err != nil {
+	switch err.(type) {
+	case *_post.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, post)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, post)
 }
 
 func (h *Handler) CreatePosts(c echo.Context) (err error) {
@@ -78,13 +88,22 @@ func (h *Handler) CreatePosts(c echo.Context) (err error) {
 		c.Param("slug_or_id"),
 		newPosts,
 	)
-	if err != nil {
+	switch err.(type) {
+	case *_post.ThreadNotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case *_post.ParentNotInThread:
+		return c.JSON(http.StatusConflict, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, posts)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, posts)
 }
 
 func (h *Handler) GetThreadPosts(c echo.Context) (err error) {
@@ -110,11 +129,16 @@ func (h *Handler) GetThreadPosts(c echo.Context) (err error) {
 		c.Request().URL.Query().Get("sort"),
 		desc,
 	)
-	if err != nil {
+	switch err.(type) {
+	case *_post.ThreadNotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, posts)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, posts)
 }

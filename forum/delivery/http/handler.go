@@ -1,17 +1,17 @@
 package forumHttp
 
 import (
-	"forum/forum"
+	_forum "forum/forum"
 	"forum/models"
 	"github.com/labstack/echo"
 	"net/http"
 )
 
 type Handler struct {
-	useCase forum.UseCase
+	useCase _forum.UseCase
 }
 
-func NewHandler(useCase forum.UseCase) *Handler {
+func NewHandler(useCase _forum.UseCase) *Handler {
 	return &Handler{useCase: useCase}
 }
 
@@ -25,24 +25,36 @@ func (h *Handler) CreateForum(c echo.Context) (err error) {
 	}
 
 	forum, err := h.useCase.CreateForum(&newForum)
-	if err != nil {
+	switch err.(type) {
+	case *_forum.UserNotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case *_forum.AlreadyExits:
+		return c.JSON(http.StatusConflict, forum)
+	case nil:
+		return c.JSON(http.StatusOK, forum)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, forum)
 }
 
 func (h *Handler) GetForum(c echo.Context) (err error) {
 	slug := c.Param("slug")
 
 	forum, err := h.useCase.GetForum(slug)
-	if err != nil {
+	switch err.(type) {
+	case *_forum.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, forum)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, forum)
 }

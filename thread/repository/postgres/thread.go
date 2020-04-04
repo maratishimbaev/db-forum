@@ -3,6 +3,7 @@ package threadPostgres
 import (
 	"database/sql"
 	"forum/models"
+	_thread "forum/thread"
 	"strconv"
 	"time"
 )
@@ -98,27 +99,75 @@ func (r *Repository) CreateThread(newThread *models.Thread) (thread models.Threa
 					 VALUES ($1, $2, $3, $4, $5, $6)`
 	_, err = r.DB.Exec(createThread, pgThread.Author, pgThread.Created, pgThread.Forum,
 						  pgThread.Message, pgThread.Slug, pgThread.Title)
+	if err != nil {
+		var forumCount uint64
 
-	// TODO: votes field
+		getForumCount := `SELECT COUNT(*) FROM forum WHERE id = $1`
+		err = r.DB.QueryRow(getForumCount, pgThread.ID).Scan(&forumCount)
+		if err != nil {
+			return thread, err
+		}
 
-	return *newThread, err
+		if forumCount > 0 {
+			var pgThread Thread
+
+			getThread := `
+				SELECT author, created, forum, message, slug, title
+				FROM thread WHERE id = $1`
+			err = r.DB.QueryRow(getThread, pgThread.ID).Scan(&pgThread)
+
+			var voteCount uint64
+
+			getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
+			err = r.DB.QueryRow(getVotes, pgThread.ID).Scan(&voteCount)
+
+			thread = *r.toModelThread(&pgThread)
+			thread.Votes = voteCount
+
+			return thread, _thread.NewAlreadyExists(newThread.Slug)
+		}
+
+		return thread, _thread.NewUserOrForumNotFound()
+	}
+
+	var voteCount uint64
+
+	getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
+	err = r.DB.QueryRow(getVotes, pgThread.ID).Scan(&voteCount)
+
+	thread = *r.toModelThread(pgThread)
+	thread.Votes = voteCount
+
+	return thread, err
 }
 
 func (r *Repository) GetThreads(slug string, limit uint64, since string, desc bool) (threads []models.Thread, err error) {
 	var forumID uint64
 	getForumID := `SELECT id FROM forum WHERE slug = $1`
 	if err := r.DB.QueryRow(getForumID, slug).Scan(&forumID); err != nil {
-		forumID = 0
+		return threads, _thread.NewUserOrForumNotFound()
 	}
 
 	getThreads := `SELECT id, author, created, message, slug, title
-				   FROM thread WHERE forum = $1`
-	rows, err := r.DB.Query(getThreads, forumID)
+				   FROM thread WHERE forum = $1 AND id > $2`
+
+	if desc {
+		getThreads = getThreads + " DESC"
+	}
+
+	var rows *sql.Rows
+
+	if limit == 0 {
+		rows, err = r.DB.Query(getThreads, forumID, since)
+	} else {
+		getThreads = getThreads + " LIMIT $3"
+
+		rows, err = r.DB.Query(getThreads, forumID, since, limit)
+	}
+
 	if err != nil {
 		return threads, err
 	}
-
-	// TODO: limit, since and desc params
 
 	for rows.Next() {
 		var pgThread Thread
@@ -128,9 +177,15 @@ func (r *Repository) GetThreads(slug string, limit uint64, since string, desc bo
 			return threads, err
 		}
 
-		// TODO: votes field
+		var voteCount uint64
 
-		threads = append(threads, *r.toModelThread(&pgThread))
+		getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
+		err = r.DB.QueryRow(getVotes, pgThread.ID).Scan(&voteCount)
+
+		thread := *r.toModelThread(&pgThread)
+		thread.Votes = voteCount
+
+		threads = append(threads, thread)
 	}
 
 	return threads, err
@@ -152,7 +207,7 @@ func (r *Repository) GetThread(slugOrID string) (thread models.Thread, err error
 						&pgThread.Message, &pgThread.Slug, &pgThread.Title)
 	}
 
-	return *r.toModelThread(&pgThread), err
+	return *r.toModelThread(&pgThread), _thread.NewNotFound(slugOrID)
 }
 
 func (r *Repository) ChangeThread(slugOrID string, newThread *models.Thread) (thread models.Thread, err error) {
@@ -169,7 +224,7 @@ func (r *Repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 	} else {
 		getThreadID := `SELECT id FROM thread WHERE slug = $1`
 		if err = r.DB.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
-			return thread, err
+			return thread, _thread.NewNotFound(slugOrID)
 		}
 	}
 
@@ -202,7 +257,7 @@ func (r *Repository) VoteThread(slugOrID string, vote models.Vote) (thread model
 	} else {
 		getThreadID := `SELECT id FROM thread WHERE slug = $1`
 		if err = r.DB.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
-			return thread, err
+			return thread, _thread.NewNotFound(slugOrID)
 		}
 	}
 

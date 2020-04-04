@@ -1,18 +1,19 @@
 package threadHttp
 
 import (
+	"forum/forum"
 	"forum/models"
-	"forum/thread"
+	_thread "forum/thread"
 	"github.com/labstack/echo"
 	"net/http"
 	"strconv"
 )
 
 type Handler struct {
-	useCase thread.UseCase
+	useCase _thread.UseCase
 }
 
-func NewHandler(useCase thread.UseCase) *Handler {
+func NewHandler(useCase _thread.UseCase) *Handler {
 	return &Handler{useCase: useCase}
 }
 
@@ -28,13 +29,20 @@ func (h *Handler) CreateThread(c echo.Context) (err error) {
 	}
 
 	thread, err := h.useCase.CreateThread(&newThread)
-	if err != nil {
+	switch err.(type) {
+	case *_thread.UserOrForumNotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case *_thread.AlreadyExists:
+		return c.JSON(http.StatusConflict, thread)
+	case nil:
+		return c.JSON(http.StatusOK, thread)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, thread)
 }
 
 func (h *Handler) GetThreads(c echo.Context) (err error) {
@@ -54,26 +62,36 @@ func (h *Handler) GetThreads(c echo.Context) (err error) {
 		c.Request().URL.Query().Get("since"),
 		desc,
 	)
-	if err != nil {
+	switch err.(type) {
+	case *_thread.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, thread)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, thread)
 }
 
 func (h *Handler) GetThread(c echo.Context) (err error) {
 	thread, err := h.useCase.GetThread(
 		c.Param("slug_or_id"),
 	)
-	if err != nil {
+	switch err.(type) {
+	case *_thread.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, thread)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, thread)
 }
 
 func (h *Handler) ChangeThread(c echo.Context) (err error) {
@@ -89,13 +107,18 @@ func (h *Handler) ChangeThread(c echo.Context) (err error) {
 		c.Param("slug_or_id"),
 		&newThread,
 	)
-	if err != nil {
+	switch err.(type) {
+	case *_thread.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, thread)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, thread)
 }
 
 func (h *Handler) VoteThread(c echo.Context) (err error) {
@@ -111,11 +134,16 @@ func (h *Handler) VoteThread(c echo.Context) (err error) {
 		c.Param("slug_or_id"),
 		newVote,
 	)
-	if err != nil {
+	switch err.(type) {
+	case *_thread.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, thread)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, thread)
 }

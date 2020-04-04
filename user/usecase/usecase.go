@@ -13,7 +13,7 @@ func NewUseCase(repository user.Repository) *UseCase {
 	return &UseCase{repository}
 }
 
-func (u *UseCase) CreateUser(newUser *models.User) (user models.User, err error) {
+func (u *UseCase) CreateUser(newUser *models.User) (users []models.User, err error) {
 	return u.repository.CreateUser(newUser)
 }
 

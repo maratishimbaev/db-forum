@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	forumPostgres "forum/forum/repository/postgres"
 	"forum/models"
+	_post "forum/post"
 	threadPostgres "forum/thread/repository/postgres"
 	userPostgres "forum/user/repository/postgres"
 	"strconv"
@@ -158,7 +159,7 @@ func (r *Repository) GetPostFull(id uint64, related []string) (postFull models.P
 				FROM post WHERE id = $1`
 	if err = r.DB.QueryRow(getPost, post.ID).
 				  Scan(&post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread); err != nil {
-		return postFull, err
+		return postFull, _post.NewNotFound(id)
 	}
 
 	var author userPostgres.User
@@ -205,7 +206,7 @@ func (r *Repository) GetPostFull(id uint64, related []string) (postFull models.P
 func (r *Repository) ChangePost(newPost *models.Post) (post models.Post, err error) {
 	changePost := `UPDATE post SET message = $1 WHERE id = $2`
 	if _, err = r.DB.Exec(changePost, newPost.Message, newPost.ID); err != nil {
-		return post, err
+		return post, _post.NewNotFound(newPost.ID)
 	}
 
 	getPost := `SELECT id, author, created, forum, is_edited, message, parent, thread
@@ -228,14 +229,17 @@ func (r *Repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	} else {
 		getThreadID := `SELECT id FROM thread WHERE slug = $1`
 		if err = r.DB.QueryRow(getThreadID, threadSlugOrID).Scan(&threadID); err != nil {
-			return posts, err
+			return posts, _post.NewThreadNotFound(threadSlugOrID)
 		}
 	}
 
-	createPost := `INSERT INTO post (author, created, forum, is_edited, message, parent, thread)
-				   VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
-	getPost := `SELECT id, author, created, forum, is_edited, message, parent, thread
-				FROM post WHERE id = $1`
+	getThread := `SELECT thread FROM post WHERE id = $1`
+	createPost := `
+		INSERT INTO post (author, created, forum, is_edited, message, parent, thread)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+	getPost := `
+		SELECT id, author, created, forum, is_edited, message, parent, thread
+		FROM post WHERE id = $1`
 
 	for _, newPost := range newPosts {
 		var postID uint64
@@ -245,6 +249,13 @@ func (r *Repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 		newPost.Thread, err = strconv.ParseUint(threadID, 10, 64)
 		if err != nil {
 			return posts, err
+		}
+
+		var parentThread uint64
+
+		err = r.DB.QueryRow(getThread, newPost.Parent).Scan(&parentThread)
+		if err != nil || parentThread == newPost.Thread {
+			return posts, _post.NewParentNotInThread()
 		}
 
 		pgPost := *r.toPostgres(&newPost)
@@ -277,7 +288,7 @@ func (r *Repository) GetThreadPosts(threadSlugOrID string, limit, since uint64, 
 	} else {
 		getThreadID := `SELECT id FROM thread WHERE slug = $1`
 		if err = r.DB.QueryRow(getThreadID, threadSlugOrID).Scan(&threadID); err != nil {
-			return posts, err
+			return posts, _post.NewThreadNotFound(threadSlugOrID)
 		}
 	}
 
