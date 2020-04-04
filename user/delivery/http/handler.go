@@ -2,17 +2,17 @@ package userHttp
 
 import (
 	"forum/models"
-	"forum/user"
+	_user "forum/user"
 	"github.com/labstack/echo"
 	"net/http"
 	"strconv"
 )
 
 type Handler struct {
-	useCase user.UseCase
+	useCase _user.UseCase
 }
 
-func NewHandler(useCase user.UseCase) *Handler {
+func NewHandler(useCase _user.UseCase) *Handler {
 	return &Handler{useCase: useCase}
 }
 
@@ -27,27 +27,35 @@ func (h *Handler) CreateUser(c echo.Context) (err error) {
 		})
 	}
 
-	user, err := h.useCase.CreateUser(&newUser)
-	if err != nil {
+	users, err := h.useCase.CreateUser(&newUser)
+	switch err.(type) {
+	case *_user.AlreadyExists:
+		return c.JSON(http.StatusConflict, users)
+	case nil:
+		return c.JSON(http.StatusOK, users[0])
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, user)
 }
 
 func (h *Handler) GetUser(c echo.Context) (err error) {
 	nickname := c.Param("nickname")
 
 	user, err := h.useCase.GetUser(nickname)
-	if err != nil {
+	switch err.(type) {
+	case *_user.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, user)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, user)
 }
 
 func (h *Handler) ChangeUser(c echo.Context) (err error) {
@@ -62,13 +70,22 @@ func (h *Handler) ChangeUser(c echo.Context) (err error) {
 	}
 
 	user, err := h.useCase.ChangeUser(&newUser)
-	if err != nil {
+	switch err.(type) {
+	case *_user.NotFound:
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case *_user.ConflictData:
+		return c.JSON(http.StatusConflict, models.Error{
+			Message: err.Error(),
+		})
+	case nil:
+		return c.JSON(http.StatusOK, user)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, user)
 }
 
 func (h *Handler) GetForumUsers(c echo.Context) (err error) {

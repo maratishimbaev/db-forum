@@ -2,6 +2,7 @@ package forumPostgres
 
 import (
 	"database/sql"
+	_forum "forum/forum"
 	"forum/models"
 )
 
@@ -65,11 +66,29 @@ func (r *Repository) GetThreadCount(forumID uint64) (threadCount uint64, err err
 func (r *Repository) CreateForum(newForum *models.Forum) (forum models.Forum, err error) {
 	pgForum := r.toPostgres(newForum)
 
-	createForum := `INSERT INTO forum (slug, title, "user")
-					VALUES ($1, $2, $3) RETURNING id`
+	createForum := `
+		INSERT INTO forum (slug, title, "user")
+		VALUES ($1, $2, $3) RETURNING id`
 	err = r.DB.QueryRow(createForum, pgForum.Slug, pgForum.Title, pgForum.User).Scan(&pgForum.ID)
 	if err != nil {
-		return forum, err
+		var userCount uint64
+
+		getUserCount := `SELECT COUNT(*) FROM "user" WHERE nickname = $1`
+		err = r.DB.QueryRow(getUserCount, newForum.User).Scan(&userCount)
+		if err != nil {
+			return forum, err
+		}
+
+		if userCount == 0 {
+			return forum, _forum.NewUserNotFound(newForum.User)
+		} else {
+			forum, err = r.GetForum(newForum.Slug)
+			if err != nil {
+				return forum, err
+			}
+
+			return forum, _forum.NewAlreadyExits()
+		}
 	}
 
 	forum = *r.toModel(pgForum)
@@ -87,7 +106,7 @@ func (r *Repository) GetForum(slug string) (forum models.Forum, err error) {
 				 FROM forum WHERE slug = $1`
 	err = r.DB.QueryRow(getForum, pgForum.Slug).Scan(&pgForum.ID, &pgForum.Title, &pgForum.User)
 	if err != nil {
-		return forum, err
+		return forum, _forum.NewNotFound(slug)
 	}
 
 	forum = *r.toModel(&pgForum)

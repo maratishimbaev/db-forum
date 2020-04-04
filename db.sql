@@ -227,10 +227,11 @@ COPY public.forum (id, slug, title, "user") FROM stdin;
 --
 
 COPY public.post (id, author, created, forum, is_edited, message, parent, thread) FROM stdin;
-10	1	2020-03-30 14:36:59.964039+03	1	f	message	0	2
-11	1	2020-03-30 14:41:06.983246+03	1	f	second message	0	2
-13	1	2020-03-30 14:43:06.387758+03	1	f	another message	0	2
-12	1	2020-03-30 14:41:51.559982+03	1	f	not second message	0	2
+14	1	2020-04-03 12:14:16.429524+03	1	f	1	0	2
+15	1	2020-04-03 12:14:16.496205+03	1	f	1.1	14	2
+16	1	2020-04-03 12:14:16.543708+03	1	f	2	0	2
+17	1	2020-04-03 12:14:16.554651+03	1	f	1.2	14	2
+18	1	2020-04-03 12:14:16.619834+03	1	f	1.3	14	2
 \.
 
 
@@ -273,7 +274,7 @@ SELECT pg_catalog.setval('public.forum_id_seq', 1, true);
 -- Name: post_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.post_id_seq', 13, true);
+SELECT pg_catalog.setval('public.post_id_seq', 18, true);
 
 
 --
@@ -287,7 +288,7 @@ SELECT pg_catalog.setval('public.thread_id_seq', 3, true);
 -- Name: user_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public.user_id_seq', 1, true);
+SELECT pg_catalog.setval('public.user_id_seq', 7, true);
 
 
 --
@@ -323,27 +324,25 @@ ALTER TABLE ONLY public.thread
 
 
 --
--- Name: user user_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public."user"
-    ADD CONSTRAINT user_email_key UNIQUE (email);
-
-
---
--- Name: user user_nickname_key; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public."user"
-    ADD CONSTRAINT user_nickname_key UNIQUE (nickname);
-
-
---
 -- Name: user user_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public."user"
     ADD CONSTRAINT user_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_lower_email_key; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX user_lower_email_key ON public."user" USING btree (lower((email)::text));
+
+
+--
+-- Name: user_lower_nickname_key; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX user_lower_nickname_key ON public."user" USING btree (lower((nickname)::text));
 
 
 --

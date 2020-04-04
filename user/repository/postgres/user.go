@@ -3,6 +3,7 @@ package userPostgres
 import (
 	"database/sql"
 	"forum/models"
+	_user "forum/user"
 )
 
 type Repository struct {
@@ -39,27 +40,47 @@ func toModel(user *User) *models.User {
 	}
 }
 
-func (r *Repository) CreateUser(newUser *models.User) (user models.User, err error) {
+func (r *Repository) CreateUser(newUser *models.User) (users []models.User, err error) {
 	pgUser := toPostgres(newUser)
 
 	createUser := `INSERT INTO "user" (about, email, fullname, nickname)
 				   VALUES ($1, $2, $3, $4)`
 	_, err = r.DB.Exec(createUser, pgUser.About, pgUser.Email, pgUser.FullName, pgUser.Nickname)
 	if err != nil {
-		return user, err
+		getUsers := `
+			SELECT about, email ,fullname, nickname
+			FROM "user" WHERE LOWER(nickname) = LOWER($1) OR LOWER(email) = LOWER($2)`
+		rows, err := r.DB.Query(getUsers, newUser.Nickname, newUser.Email)
+		if err != nil {
+			return users, err
+		}
+
+		for rows.Next() {
+			err = rows.Scan(&pgUser)
+			if err != nil {
+				return users, err
+			}
+
+			users = append(users, *toModel(pgUser))
+		}
+
+		return users, _user.NewAlreadyExists()
 	}
 
-	return *newUser, err
+	users = append(users, *newUser)
+
+	return users, err
 }
 
 func (r *Repository) GetUser(nickname string) (user models.User, err error) {
 	pgUser := User{Nickname: nickname}
 
-	getUser := `SELECT about, email, fullname
-			   FROM "user" WHERE nickname = $1`
+	getUser := `
+		SELECT about, email, fullname
+		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 	err = r.DB.QueryRow(getUser, pgUser.Nickname).Scan(&pgUser.About, &pgUser.Email, &pgUser.FullName)
 	if err != nil {
-		return user, err
+		return user, _user.NewNotFound(nickname)
 	}
 
 	return *toModel(&pgUser), err
@@ -70,10 +91,22 @@ func (r *Repository) ChangeUser(newUser *models.User) (user models.User, err err
 
 	changeUser := `UPDATE "user"
 				   SET about = $1, email = $2, fullname = $3
-				   WHERE nickname = $4`
+				   WHERE LOWER(nickname) = LOWER($4)`
 	_, err = r.DB.Exec(changeUser, pgUser.About, pgUser.Email, pgUser.FullName, pgUser.Nickname)
 	if err != nil {
-		return user, err
+		var userCount uint64
+
+		getUserCount := `SELECT COUNT(*) FROM "user" WHERE nickname = $1`
+		err = r.DB.QueryRow(getUserCount, newUser.Nickname).Scan(&userCount)
+		if err != nil {
+			return user, err
+		}
+
+		if userCount == 0 {
+			return user, _user.NewNotFound(newUser.Nickname)
+		}
+
+		return user, _user.NewConflictData()
 	}
 
 	return *toModel(&pgUser), nil
@@ -97,7 +130,7 @@ func (r *Repository) GetForumUsers(forumSlug string, limit uint64, since string,
 
 		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 		if err != nil {
-			return users, err
+			return users, _user.NewForumNotFound(forumSlug)
 		}
 
 		users = append(users, *toModel(&user))
