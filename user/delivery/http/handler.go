@@ -1,6 +1,7 @@
 package userHttp
 
 import (
+	"errors"
 	"forum/models"
 	_user "forum/user"
 	"github.com/labstack/echo"
@@ -28,10 +29,10 @@ func (h *Handler) CreateUser(c echo.Context) (err error) {
 	}
 
 	users, err := h.useCase.CreateUser(&newUser)
-	switch err.(type) {
-	case *_user.AlreadyExists:
+	switch true {
+	case errors.Is(err, _user.ErrAlreadyExists):
 		return c.JSON(http.StatusConflict, users)
-	case nil:
+	case err == nil:
 		return c.JSON(http.StatusCreated, users[0])
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
@@ -44,12 +45,12 @@ func (h *Handler) GetUser(c echo.Context) (err error) {
 	nickname := c.Param("nickname")
 
 	user, err := h.useCase.GetUser(nickname)
-	switch err.(type) {
-	case *_user.NotFound:
+	switch true {
+	case errors.Is(err, _user.ErrNotFound):
 		return c.JSON(http.StatusNotFound, models.Error{
 			Message: err.Error(),
 		})
-	case nil:
+	case err == nil:
 		return c.JSON(http.StatusOK, user)
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
@@ -70,16 +71,16 @@ func (h *Handler) ChangeUser(c echo.Context) (err error) {
 	}
 
 	user, err := h.useCase.ChangeUser(&newUser)
-	switch err.(type) {
-	case *_user.NotFound:
+	switch true {
+	case errors.Is(err, _user.ErrNotFound):
 		return c.JSON(http.StatusNotFound, models.Error{
 			Message: err.Error(),
 		})
-	case *_user.ConflictData:
+	case errors.Is(err, _user.ErrConflictData):
 		return c.JSON(http.StatusConflict, models.Error{
 			Message: err.Error(),
 		})
-	case nil:
+	case err == nil:
 		return c.JSON(http.StatusOK, user)
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
@@ -105,11 +106,16 @@ func (h *Handler) GetForumUsers(c echo.Context) (err error) {
 		c.Request().URL.Query().Get("since"),
 		desc,
 	)
-	if err != nil {
+	switch true {
+	case errors.Is(err, _user.ErrForumNotFound):
+		return c.JSON(http.StatusNotFound, models.Error{
+			Message: err.Error(),
+		})
+	case err == nil:
+		return c.JSON(http.StatusOK, users)
+	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
 			Message: err.Error(),
 		})
 	}
-
-	return c.JSON(http.StatusOK, users)
 }

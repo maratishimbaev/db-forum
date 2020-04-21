@@ -27,7 +27,7 @@ SET default_table_access_method = heap;
 CREATE TABLE public.forum (
     id integer NOT NULL,
     slug character varying(256) NOT NULL,
-    title character varying(64) NOT NULL,
+    title character varying(256) NOT NULL,
     "user" integer NOT NULL
 );
 
@@ -218,7 +218,6 @@ ALTER TABLE ONLY public."user" ALTER COLUMN id SET DEFAULT nextval('public.user_
 --
 
 COPY public.forum (id, slug, title, "user") FROM stdin;
-1	slug	title	1
 \.
 
 
@@ -227,11 +226,6 @@ COPY public.forum (id, slug, title, "user") FROM stdin;
 --
 
 COPY public.post (id, author, created, forum, is_edited, message, parent, thread) FROM stdin;
-14	1	2020-04-03 12:14:16.429524+03	1	f	1	0	2
-15	1	2020-04-03 12:14:16.496205+03	1	f	1.1	14	2
-16	1	2020-04-03 12:14:16.543708+03	1	f	2	0	2
-17	1	2020-04-03 12:14:16.554651+03	1	f	1.2	14	2
-18	1	2020-04-03 12:14:16.619834+03	1	f	1.3	14	2
 \.
 
 
@@ -240,8 +234,6 @@ COPY public.post (id, author, created, forum, is_edited, message, parent, thread
 --
 
 COPY public.thread (id, author, created, forum, message, slug, title) FROM stdin;
-3	1	2020-03-28 03:00:00+03	1	second message		second title
-2	1	2020-03-28 03:00:00+03	1	new message	thread_slug	new title
 \.
 
 
@@ -250,7 +242,6 @@ COPY public.thread (id, author, created, forum, message, slug, title) FROM stdin
 --
 
 COPY public."user" (id, about, email, fullname, nickname) FROM stdin;
-1	new about	new email	new fullname	nickname
 \.
 
 
@@ -259,7 +250,6 @@ COPY public."user" (id, about, email, fullname, nickname) FROM stdin;
 --
 
 COPY public.vote ("user", voice, thread) FROM stdin;
-1	1	2
 \.
 
 
@@ -300,14 +290,6 @@ ALTER TABLE ONLY public.forum
 
 
 --
--- Name: forum forum_slug_key; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.forum
-    ADD CONSTRAINT forum_slug_key UNIQUE (slug);
-
-
---
 -- Name: post post_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -332,6 +314,20 @@ ALTER TABLE ONLY public."user"
 
 
 --
+-- Name: forum_lower_slug_key; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX forum_lower_slug_key ON public.forum USING btree (lower((slug)::text));
+
+
+--
+-- Name: thread_lower_slug_key; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX thread_lower_slug_key ON public.thread USING btree (lower((slug)::text)) WHERE ((slug IS NOT NULL) AND ((slug)::text <> ''::text));
+
+
+--
 -- Name: user_lower_email_key; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -343,6 +339,13 @@ CREATE UNIQUE INDEX user_lower_email_key ON public."user" USING btree (lower((em
 --
 
 CREATE UNIQUE INDEX user_lower_nickname_key ON public."user" USING btree (lower((nickname)::text));
+
+
+--
+-- Name: vote_user_and_thread_key; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX vote_user_and_thread_key ON public.vote USING btree ("user", thread);
 
 
 --

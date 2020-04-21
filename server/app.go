@@ -32,10 +32,10 @@ import (
 )
 
 type App struct {
-	userUseCase user.UseCase
-	forumUseCase forum.UseCase
-	threadUseCase thread.UseCase
-	postUseCase post.UseCase
+	userUseCase    user.UseCase
+	forumUseCase   forum.UseCase
+	threadUseCase  thread.UseCase
+	postUseCase    post.UseCase
 	serviceUseCase service.UseCase
 }
 
@@ -45,14 +45,14 @@ func NewApp() *App {
 	userRepository := userPostgres.NewRepository(db)
 	forumRepository := forumPostgres.NewRepository(db)
 	threadRepository := threadPostgres.NewRepository(db)
-	postRepository := postPostgres.NewRepository(db)
+	postRepository := postPostgres.NewRepository(db, forumRepository)
 	serviceRepository := servicePostgres.NewRepository(db)
 
 	return &App{
-		userUseCase: userUseCase.NewUseCase(userRepository),
-		forumUseCase: forumUseCase.NewUseCase(forumRepository),
-		threadUseCase: threadUsecase.NewUseCase(threadRepository),
-		postUseCase: postUseCase.NewUseCase(postRepository),
+		userUseCase:    userUseCase.NewUseCase(userRepository),
+		forumUseCase:   forumUseCase.NewUseCase(forumRepository),
+		threadUseCase:  threadUsecase.NewUseCase(threadRepository),
+		postUseCase:    postUseCase.NewUseCase(postRepository),
 		serviceUseCase: serviceUsecase.NewUseCase(serviceRepository),
 	}
 }
