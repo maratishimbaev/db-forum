@@ -17,42 +17,42 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 type Thread struct {
-	ID uint64
-	Author uint64
+	ID      uint64
+	Author  uint64
 	Created time.Time
-	Forum uint64
+	Forum   uint64
 	Message string
-	Slug string
-	Title string
+	Slug    string
+	Title   string
 }
 
 type Vote struct {
-	User uint64
-	Voice int64
+	User   uint64
+	Voice  int64
 	Thread uint64
 }
 
-func (r *Repository) toPostgresThread(thread *models.Thread) *Thread {
+func (r *Repository) toPostgresThread(thread *models.Thread) (pgThread Thread, err error) {
 	var authorID uint64
-	getAuthorID := `SELECT id FROM "user" WHERE nickname = $1`
+	getAuthorID := `SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 	if err := r.DB.QueryRow(getAuthorID, thread.Author).Scan(&authorID); err != nil {
-		authorID = 0
+		return pgThread, _thread.UserOrForumNotFound
 	}
 
 	var forumID uint64
-	getForumID := `SELECT id FROM forum WHERE slug = $1`
+	getForumID := `SELECT id FROM forum WHERE LOWER(slug) = LOWER($1)`
 	if err := r.DB.QueryRow(getForumID, thread.Forum).Scan(&forumID); err != nil {
-		forumID = 0
+		return pgThread, _thread.UserOrForumNotFound
 	}
 
-	return &Thread{
+	return Thread{
 		Author:  authorID,
 		Created: thread.Created,
 		Forum:   forumID,
 		Message: thread.Message,
 		Slug:    thread.Slug,
 		Title:   thread.Title,
-	}
+	}, err
 }
 
 func (r *Repository) toModelThread(thread *Thread) *models.Thread {
@@ -87,72 +87,65 @@ func (r *Repository) toPostgresVote(vote *models.Vote) *Vote {
 	}
 
 	return &Vote{
-		User:   userID,
-		Voice:  vote.Voice,
+		User:  userID,
+		Voice: vote.Voice,
 	}
 }
 
 func (r *Repository) CreateThread(newThread *models.Thread) (thread models.Thread, err error) {
-	pgThread := r.toPostgresThread(newThread)
-
-	createThread := `INSERT INTO thread (author, created, forum, message, slug, title)
-					 VALUES ($1, $2, $3, $4, $5, $6)`
-	_, err = r.DB.Exec(createThread, pgThread.Author, pgThread.Created, pgThread.Forum,
-						  pgThread.Message, pgThread.Slug, pgThread.Title)
+	pgThread, err := r.toPostgresThread(newThread)
 	if err != nil {
-		var forumCount uint64
+		return thread, err
+	}
 
-		getForumCount := `SELECT COUNT(*) FROM forum WHERE id = $1`
-		err = r.DB.QueryRow(getForumCount, pgThread.ID).Scan(&forumCount)
+	createThread := `
+		INSERT INTO thread (author, created, forum, message, slug, title)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
+	err = r.DB.QueryRow(createThread, pgThread.Author, pgThread.Created, pgThread.Forum, pgThread.Message, pgThread.Slug, pgThread.Title).
+		Scan(&pgThread.ID)
+
+	if err != nil {
+		thread, err = r.GetThreadBySlug(pgThread.Slug)
 		if err != nil {
 			return thread, err
 		}
 
-		if forumCount > 0 {
-			var pgThread Thread
-
-			getThread := `
-				SELECT author, created, forum, message, slug, title
-				FROM thread WHERE id = $1`
-			err = r.DB.QueryRow(getThread, pgThread.ID).Scan(&pgThread)
-
-			var voteCount uint64
-
-			getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
-			err = r.DB.QueryRow(getVotes, pgThread.ID).Scan(&voteCount)
-
-			thread = *r.toModelThread(&pgThread)
-			thread.Votes = voteCount
-
-			return thread, _thread.NewAlreadyExists(newThread.Slug)
-		}
-
-		return thread, _thread.NewUserOrForumNotFound()
+		return thread, _thread.AlreadyExists
 	}
 
-	var voteCount uint64
-
-	getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
-	err = r.DB.QueryRow(getVotes, pgThread.ID).Scan(&voteCount)
-
-	thread = *r.toModelThread(pgThread)
-	thread.Votes = voteCount
+	thread, err = r.GetThreadByID(pgThread.ID)
+	if err != nil {
+		return thread, err
+	}
 
 	return thread, err
 }
 
-func (r *Repository) GetThreads(slug string, limit uint64, since string, desc bool) (threads []models.Thread, err error) {
+func (r *Repository) GetThreads(slug string, limit uint64, since time.Time, desc bool) (threads []models.Thread, err error) {
 	var forumID uint64
-	getForumID := `SELECT id FROM forum WHERE slug = $1`
+	getForumID := `SELECT id FROM forum WHERE LOWER(slug) = LOWER($1)`
 	if err := r.DB.QueryRow(getForumID, slug).Scan(&forumID); err != nil {
-		return threads, _thread.NewUserOrForumNotFound()
+		return threads, _thread.UserOrForumNotFound
 	}
 
-	getThreads := `SELECT id, author, created, message, slug, title
-				   FROM thread WHERE forum = $1 AND id > $2`
+	var getThreads string
 
 	if desc {
-		getThreads = getThreads + " DESC"
+		getThreads = `
+			SELECT id, author, created, message, slug, title
+			FROM thread WHERE forum = $1 AND created <= $2 ORDER BY created DESC`
+
+		if since == (time.Time{}) {
+			since = time.Now().AddDate(1000, 0, 0)
+		}
+	} else {
+		getThreads = `
+			SELECT id, author, created, message, slug, title
+			FROM thread WHERE forum = $1 AND created >= $2 ORDER BY created`
+
+		if since == (time.Time{}) {
+			since = time.Now().AddDate(-1000, 0, 0)
+		}
 	}
 
 	var rows *sql.Rows
@@ -169,11 +162,19 @@ func (r *Repository) GetThreads(slug string, limit uint64, since string, desc bo
 		return threads, err
 	}
 
+	var forumSlug string
+
+	getForumSlug := `SELECT slug FROM forum WHERE LOWER(slug) = LOWER($1)`
+	err = r.DB.QueryRow(getForumSlug, slug).Scan(&forumSlug)
+	if err != nil {
+		return threads, err
+	}
+
 	for rows.Next() {
 		var pgThread Thread
 
 		if err = rows.Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created,
-						&pgThread.Message, &pgThread.Slug, &pgThread.Title); err != nil {
+			&pgThread.Message, &pgThread.Slug, &pgThread.Title); err != nil {
 			return threads, err
 		}
 
@@ -184,30 +185,71 @@ func (r *Repository) GetThreads(slug string, limit uint64, since string, desc bo
 
 		thread := *r.toModelThread(&pgThread)
 		thread.Votes = voteCount
+		thread.Forum = forumSlug
 
 		threads = append(threads, thread)
+	}
+
+	if len(threads) == 0 {
+		return []models.Thread{}, err
 	}
 
 	return threads, err
 }
 
-func (r *Repository) GetThread(slugOrID string) (thread models.Thread, err error) {
+func (r *Repository) GetThreadByID(id uint64) (thread models.Thread, err error) {
 	var pgThread Thread
 
-	getThreadByID := `SELECT id, author, created, message, slug, title
-				   	  FROM thread WHERE id = $1`
-	getThreadBySlug := `SELECT id, author, created, message, slug, title
-				   		FROM thread WHERE slug = $1`
-
-	if err = r.DB.QueryRow(getThreadByID, slugOrID).
-				  Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created,
-				  	   &pgThread.Message, &pgThread.Slug, &pgThread.Title); err != nil {
-		err = r.DB.QueryRow(getThreadBySlug, slugOrID).
-				   Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created,
-						&pgThread.Message, &pgThread.Slug, &pgThread.Title)
+	getThread := `
+		SELECT id, author, created, message, slug, title, forum
+		FROM thread WHERE id = $1`
+	if err = r.DB.QueryRow(getThread, id).
+		Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created, &pgThread.Message, &pgThread.Slug, &pgThread.Title, &pgThread.Forum); err != nil {
+		return thread, _thread.NotFound
 	}
 
-	return *r.toModelThread(&pgThread), _thread.NewNotFound(slugOrID)
+	thread = *r.toModelThread(&pgThread)
+
+	getVotes := `SELECT SUM(voice) FROM vote WHERE thread = $1`
+	_ = r.DB.QueryRow(getVotes, pgThread.ID).Scan(&thread.Votes)
+
+	return thread, err
+}
+
+func (r *Repository) GetThreadBySlug(slug string) (thread models.Thread, err error) {
+	var pgThread Thread
+
+	getThread := `
+		SELECT id, author, created, message, slug, title, forum
+		FROM thread WHERE LOWER(slug) = LOWER($1)`
+	if err = r.DB.QueryRow(getThread, slug).
+		Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created, &pgThread.Message, &pgThread.Slug, &pgThread.Title, &pgThread.Forum); err != nil {
+		return thread, _thread.NotFound
+	}
+
+	thread = *r.toModelThread(&pgThread)
+
+	getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
+	_ = r.DB.QueryRow(getVotes, pgThread.ID).Scan(&thread.Votes)
+
+	return thread, err
+}
+
+func (r *Repository) GetThread(slugOrID string) (thread models.Thread, err error) {
+	if thread, err = r.GetThreadBySlug(slugOrID); err != nil {
+		id, err := strconv.ParseUint(slugOrID, 10, 64)
+		if err != nil {
+			return thread, _thread.NotFound
+		}
+
+		if thread, err = r.GetThreadByID(id); err != nil {
+			return thread, _thread.NotFound
+		}
+
+		return thread, err
+	}
+
+	return thread, err
 }
 
 func (r *Repository) ChangeThread(slugOrID string, newThread *models.Thread) (thread models.Thread, err error) {
@@ -222,23 +264,21 @@ func (r *Repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 			return thread, err
 		}
 	} else {
-		getThreadID := `SELECT id FROM thread WHERE slug = $1`
+		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
 		if err = r.DB.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
-			return thread, _thread.NewNotFound(slugOrID)
+			return thread, _thread.NotFound
 		}
 	}
 
 	var oldThread Thread
 
 	getOldThread := `SELECT message, title FROM thread WHERE id = $1`
-	err = r.DB.QueryRow(getOldThread, threadID).Scan(oldThread)
+	err = r.DB.QueryRow(getOldThread, threadID).Scan(&oldThread.Message, &oldThread.Title)
 	if err != nil {
 		return thread, err
 	}
 
-	if newThread.Message == "" && newThread.Title == "" {
-		return models.Thread{}, err
-	} else {
+	if !(newThread.Message == "" && newThread.Title == "") {
 		if newThread.Message == "" {
 			newThread.Message = oldThread.Message
 		}
@@ -246,18 +286,20 @@ func (r *Repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 			newThread.Title = oldThread.Title
 		}
 
-		changeThread := `UPDATE thread
-					 SET message = $1, title = $2
-					 WHERE id = $3`
+		changeThread := `
+			UPDATE thread
+			SET message = $1, title = $2
+			WHERE id = $3`
 		_, err = r.DB.Exec(changeThread, newThread.Message, newThread.Title, threadID)
 	}
 
 	var pgThread Thread
 
-	getThread := `SELECT id, author, created, forum, message, slug, title
-				  FROM thread WHERE id = $1`
+	getThread := `
+		SELECT id, author, created, forum, message, slug, title
+		FROM thread WHERE id = $1`
 	err = r.DB.QueryRow(getThread, threadID).
-			   Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created, &pgThread.Forum, &pgThread.Message, &pgThread.Slug, &pgThread.Title)
+		Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created, &pgThread.Forum, &pgThread.Message, &pgThread.Slug, &pgThread.Title)
 
 	return *r.toModelThread(&pgThread), err
 }
@@ -274,24 +316,30 @@ func (r *Repository) VoteThread(slugOrID string, vote models.Vote) (thread model
 			return thread, err
 		}
 	} else {
-		getThreadID := `SELECT id FROM thread WHERE slug = $1`
+		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
 		if err = r.DB.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
-			return thread, _thread.NewNotFound(slugOrID)
+			return thread, _thread.NotFound
 		}
 	}
 
 	pgVote := *r.toPostgresVote(&vote)
 
-	createVote := `INSERT INTO vote ("user", voice, thread)
-				   VALUES ($1, $2, $3)`
-	_, err = r.DB.Exec(createVote, pgVote.User, pgVote.Voice, threadID)
+	checkUser := `SELECT COUNT(*) <> 0 FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 
-	var pgThread Thread
+	var hasUser bool
 
-	getThread := `SELECT id, author, created, forum, message, slug, title
-				  FROM thread WHERE id = $1`
-	err = r.DB.QueryRow(getThread, threadID).
-		Scan(&pgThread.ID, &pgThread.Author, &pgThread.Created, &pgThread.Forum, &pgThread.Message, &pgThread.Slug, &pgThread.Title)
+	err = r.DB.QueryRow(checkUser, vote.Nickname).Scan(&hasUser)
+	if err != nil || !hasUser {
+		return thread, _thread.NotFound
+	}
 
-	return *r.toModelThread(&pgThread), err
+	createVote := `INSERT INTO vote ("user", voice, thread) VALUES ($1, $2, $3)`
+	if _, err = r.DB.Exec(createVote, pgVote.User, pgVote.Voice, threadID); err != nil {
+		changeVote := `UPDATE vote SET voice = $1 WHERE "user" = $2 AND thread = $3`
+		if _, err = r.DB.Exec(changeVote, pgVote.Voice, pgVote.User, threadID); err != nil {
+			return thread, err
+		}
+	}
+
+	return r.GetThreadByID(threadID)
 }

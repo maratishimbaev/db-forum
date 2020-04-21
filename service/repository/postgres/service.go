@@ -1,6 +1,7 @@
 package servicePostgres
 
 import (
+	"context"
 	"database/sql"
 	"forum/models"
 )
@@ -14,55 +15,47 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 func (r *Repository) ClearDB() (err error) {
-	beginTransaction := `BEGIN;`
-	_, err = r.DB.Exec(beginTransaction)
+	tx, err := r.DB.BeginTx(context.Background(), nil)
 	if err != nil {
 		return err
 	}
 
-	rollbackTransaction := `ROLLBACK`
-
 	clearVote := `DELETE FROM vote`
 	_, err = r.DB.Exec(clearVote)
 	if err != nil {
-		r.DB.Exec(rollbackTransaction)
+		tx.Rollback()
 		return err
 	}
 
 	clearPost := `DELETE FROM post`
 	_, err = r.DB.Exec(clearPost)
 	if err != nil {
-		r.DB.Exec(rollbackTransaction)
+		tx.Rollback()
 		return err
 	}
 
 	clearThread := `DELETE FROM thread`
 	_, err = r.DB.Exec(clearThread)
 	if err != nil {
-		r.DB.Exec(rollbackTransaction)
+		tx.Rollback()
 		return err
 	}
 
 	clearForum := `DELETE FROM forum`
 	_, err = r.DB.Exec(clearForum)
 	if err != nil {
-		r.DB.Exec(rollbackTransaction)
+		tx.Rollback()
 		return err
 	}
 
 	clearUser := `DELETE FROM "user"`
 	_, err = r.DB.Exec(clearUser)
 	if err != nil {
-		r.DB.Exec(rollbackTransaction)
+		tx.Rollback()
 		return err
 	}
 
-	commitTransaction := `COMMIT`
-	_, err = r.DB.Exec(commitTransaction)
-	if err != nil {
-		return err
-	}
-
+	err = tx.Commit()
 	return err
 }
 

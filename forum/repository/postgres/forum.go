@@ -15,15 +15,15 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 type Forum struct {
-	ID uint64
-	Slug string
+	ID    uint64
+	Slug  string
 	Title string
-	User uint64
+	User  uint64
 }
 
 func (r *Repository) toPostgres(forum *models.Forum) *Forum {
 	var userID uint64
-	getUserID := `SELECT id FROM "user" WHERE nickname = $1`
+	getUserID := `SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 	if err := r.DB.QueryRow(getUserID, forum.User).Scan(&userID); err != nil {
 		userID = 0
 	}
@@ -43,22 +43,28 @@ func (r *Repository) toModel(forum *Forum) *models.Forum {
 	}
 
 	return &models.Forum{
-		Slug:    forum.Slug,
-		Title:   forum.Title,
-		User:    userNickname,
+		Slug:  forum.Slug,
+		Title: forum.Title,
+		User:  userNickname,
 	}
 }
 
-func (r *Repository) GetPostCount(forumID uint64) (postCount uint64, err error) {
-	countPosts := `SELECT COUNT(*) FROM post WHERE forum = $1`
-	err = r.DB.QueryRow(countPosts, forumID).Scan(&postCount)
+func (r *Repository) GetPostCount(forumSlug string) (postCount uint64, err error) {
+	countPosts := `
+		SELECT COUNT(*) FROM post p
+		JOIN forum f ON p.forum = f.id
+		WHERE LOWER(f.slug) = LOWER($1)`
+	err = r.DB.QueryRow(countPosts, forumSlug).Scan(&postCount)
 
 	return postCount, err
 }
 
-func (r *Repository) GetThreadCount(forumID uint64) (threadCount uint64, err error) {
-	countThreads := `SELECT COUNT(*) FROM thread WHERE forum = $1`
-	err = r.DB.QueryRow(countThreads, forumID).Scan(&threadCount)
+func (r *Repository) GetThreadCount(forumSlug string) (threadCount uint64, err error) {
+	countThreads := `
+		SELECT COUNT(*) FROM thread t
+		JOIN forum f ON t.forum = f.id
+		WHERE LOWER(f.slug) = LOWER($1)`
+	err = r.DB.QueryRow(countThreads, forumSlug).Scan(&threadCount)
 
 	return threadCount, err
 }
@@ -68,12 +74,13 @@ func (r *Repository) CreateForum(newForum *models.Forum) (forum models.Forum, er
 
 	createForum := `
 		INSERT INTO forum (slug, title, "user")
-		VALUES ($1, $2, $3) RETURNING id`
-	err = r.DB.QueryRow(createForum, pgForum.Slug, pgForum.Title, pgForum.User).Scan(&pgForum.ID)
+		VALUES ($1, $2, $3)`
+	_, err = r.DB.Exec(createForum, pgForum.Slug, pgForum.Title, pgForum.User)
+
 	if err != nil {
 		var userCount uint64
 
-		getUserCount := `SELECT COUNT(*) FROM "user" WHERE nickname = $1`
+		getUserCount := `SELECT COUNT(*) FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 		err = r.DB.QueryRow(getUserCount, newForum.User).Scan(&userCount)
 		if err != nil {
 			return forum, err
@@ -91,28 +98,28 @@ func (r *Repository) CreateForum(newForum *models.Forum) (forum models.Forum, er
 		}
 	}
 
-	forum = *r.toModel(pgForum)
-
-	forum.Posts, err = r.GetPostCount(pgForum.ID)
-	forum.Threads, err = r.GetThreadCount(pgForum.ID)
+	forum, err = r.GetForum(newForum.Slug)
+	if err != nil {
+		return forum, err
+	}
 
 	return forum, err
 }
 
 func (r *Repository) GetForum(slug string) (forum models.Forum, err error) {
-	pgForum := Forum{Slug: slug}
+	var pgForum Forum
 
-	getForum := `SELECT id, title, "user"
-				 FROM forum WHERE slug = $1`
-	err = r.DB.QueryRow(getForum, pgForum.Slug).Scan(&pgForum.ID, &pgForum.Title, &pgForum.User)
+	getForum := `SELECT title, "user", slug
+				 FROM forum WHERE LOWER(slug) = LOWER($1)`
+	err = r.DB.QueryRow(getForum, slug).Scan(&pgForum.Title, &pgForum.User, &pgForum.Slug)
 	if err != nil {
 		return forum, _forum.NewNotFound(slug)
 	}
 
 	forum = *r.toModel(&pgForum)
 
-	forum.Posts, err = r.GetPostCount(pgForum.ID)
-	forum.Threads, err = r.GetThreadCount(pgForum.ID)
+	forum.Posts, err = r.GetPostCount(pgForum.Slug)
+	forum.Threads, err = r.GetThreadCount(pgForum.Slug)
 
 	return forum, err
 }

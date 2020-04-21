@@ -14,7 +14,7 @@ func NewUseCase(repository service.Repository) *UseCase {
 }
 
 func (u *UseCase) ClearDB() (err error) {
-	return u.ClearDB()
+	return u.repository.ClearDB()
 }
 
 func (u *UseCase) GetStatus() (status models.Status, err error) {

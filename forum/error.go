@@ -16,7 +16,7 @@ func (e *UserNotFound) Error() string {
 	return fmt.Sprintf("Can't find user with nickname %s", e.Nickname)
 }
 
-type AlreadyExits struct {}
+type AlreadyExits struct{}
 
 func NewAlreadyExits() *AlreadyExits {
 	return &AlreadyExits{}
