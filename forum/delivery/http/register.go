@@ -8,6 +8,6 @@ import (
 func RegisterHTTPEndpoints(router *echo.Echo, u forum.UseCase) {
 	h := NewHandler(u)
 
-	router.POST("api//forum/create", h.CreateForum)
-	router.GET("api//forum/:slug/details", h.GetForum)
+	router.POST("api/forum/create", h.CreateForum)
+	router.GET("api/forum/:slug/details", h.GetForum)
 }
