@@ -8,8 +8,8 @@ import (
 func RegisterHTTPEndpoints(router *echo.Echo, u post.UseCase) {
 	h := NewHandler(u)
 
-	router.GET("/post/:id/details", h.GetPostFull)
-	router.POST("/post/:id/details", h.ChangePost)
-	router.POST("/thread/:slug_or_id/create", h.CreatePosts)
-	router.GET("thread/:slug_or_id/posts", h.GetThreadPosts)
+	router.GET("api/post/:id/details", h.GetPostFull)
+	router.POST("api/post/:id/details", h.ChangePost)
+	router.POST("api/thread/:slug_or_id/create", h.CreatePosts)
+	router.GET("api/thread/:slug_or_id/posts", h.GetThreadPosts)
 }
