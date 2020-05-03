@@ -42,10 +42,10 @@ type App struct {
 func NewApp() *App {
 	db := initDB()
 
-	userRepository := userPostgres.NewRepository(db)
-	forumRepository := forumPostgres.NewRepository(db)
-	threadRepository := threadPostgres.NewRepository(db)
-	postRepository := postPostgres.NewRepository(db, forumRepository)
+	userRepository := userPostgres.NewUserRepository(db)
+	forumRepository := forumPostgres.NewForumRepository(db)
+	threadRepository := threadPostgres.NewThreadRepository(db)
+	postRepository := postPostgres.NewPostRepository(db)
 	serviceRepository := servicePostgres.NewRepository(db)
 
 	return &App{

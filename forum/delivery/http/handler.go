@@ -1,6 +1,7 @@
 package forumHttp
 
 import (
+	"errors"
 	_forum "forum/forum"
 	"forum/models"
 	"github.com/labstack/echo"
@@ -25,14 +26,14 @@ func (h *Handler) CreateForum(c echo.Context) (err error) {
 	}
 
 	forum, err := h.useCase.CreateForum(&newForum)
-	switch err.(type) {
-	case *_forum.UserNotFound:
+	switch true {
+	case errors.Is(err, _forum.ErrUserNotFound):
 		return c.JSON(http.StatusNotFound, models.Error{
 			Message: err.Error(),
 		})
-	case *_forum.AlreadyExits:
+	case errors.Is(err, _forum.ErrAlreadyExists):
 		return c.JSON(http.StatusConflict, forum)
-	case nil:
+	case err == nil:
 		return c.JSON(http.StatusCreated, forum)
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{
@@ -45,12 +46,12 @@ func (h *Handler) GetForum(c echo.Context) (err error) {
 	slug := c.Param("slug")
 
 	forum, err := h.useCase.GetForum(slug)
-	switch err.(type) {
-	case *_forum.NotFound:
+	switch true {
+	case errors.Is(err, _forum.ErrNotFound):
 		return c.JSON(http.StatusNotFound, models.Error{
 			Message: err.Error(),
 		})
-	case nil:
+	case err == nil:
 		return c.JSON(http.StatusOK, forum)
 	default:
 		return c.JSON(http.StatusInternalServerError, models.Error{

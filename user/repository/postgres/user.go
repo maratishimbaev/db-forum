@@ -8,62 +8,60 @@ import (
 	"strings"
 )
 
-type Repository struct {
-	DB *sql.DB
+type repository struct {
+	db *sql.DB
 }
 
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{DB: db}
+func NewUserRepository(db *sql.DB) *repository {
+	return &repository{db: db}
 }
 
-type User struct {
-	ID       uint64
-	About    string
-	Email    string
-	FullName string
-	Nickname string
-}
+//type User struct {
+//	ID       uint64
+//	About    string
+//	Email    string
+//	FullName string
+//	Nickname string
+//}
+//
+//func toPostgres(user *models.User) *User {
+//	return &User{
+//		About:    user.About,
+//		Email:    user.Email,
+//		FullName: user.FullName,
+//		Nickname: user.Nickname,
+//	}
+//}
+//
+//func toModel(user *User) *models.User {
+//	return &models.User{
+//		About:    user.About,
+//		Email:    user.Email,
+//		FullName: user.FullName,
+//		Nickname: user.Nickname,
+//	}
+//}
 
-func toPostgres(user *models.User) *User {
-	return &User{
-		About:    user.About,
-		Email:    user.Email,
-		FullName: user.FullName,
-		Nickname: user.Nickname,
-	}
-}
-
-func toModel(user *User) *models.User {
-	return &models.User{
-		About:    user.About,
-		Email:    user.Email,
-		FullName: user.FullName,
-		Nickname: user.Nickname,
-	}
-}
-
-func (r *Repository) CreateUser(newUser *models.User) (users []models.User, err error) {
-	pgUser := toPostgres(newUser)
-
+func (r *repository) CreateUser(newUser *models.User) (users []models.User, err error) {
 	createUser := `INSERT INTO "user" (about, email, fullname, nickname)
 				   VALUES ($1, $2, $3, $4)`
-	_, err = r.DB.Exec(createUser, pgUser.About, pgUser.Email, pgUser.FullName, pgUser.Nickname)
+	_, err = r.db.Exec(createUser, newUser.About, newUser.Email, newUser.FullName, newUser.Nickname)
 	if err != nil {
 		getUsers := `
 			SELECT about, email ,fullname, nickname
 			FROM "user" WHERE LOWER(nickname) = LOWER($1) OR LOWER(email) = LOWER($2)`
-		rows, err := r.DB.Query(getUsers, newUser.Nickname, newUser.Email)
+		rows, err := r.db.Query(getUsers, newUser.Nickname, newUser.Email)
 		if err != nil {
 			return users, err
 		}
 
 		for rows.Next() {
-			err = rows.Scan(&pgUser.About, &pgUser.Email, &pgUser.FullName, &pgUser.Nickname)
+			err = rows.Scan(&newUser.About, &newUser.Email, &newUser.FullName, &newUser.Nickname)
 			if err != nil {
 				return users, err
 			}
 
-			users = append(users, *toModel(pgUser))
+			users = append(users, *newUser)
 		}
 
 		return users, _user.ErrAlreadyExists
@@ -74,29 +72,25 @@ func (r *Repository) CreateUser(newUser *models.User) (users []models.User, err 
 	return users, err
 }
 
-func (r *Repository) GetUser(nickname string) (user models.User, err error) {
-	var pgUser User
-
+func (r *repository) GetUser(nickname string) (user models.User, err error) {
 	getUser := `
 		SELECT about, email, fullname, nickname
 		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-	err = r.DB.QueryRow(getUser, nickname).Scan(&pgUser.About, &pgUser.Email, &pgUser.FullName, &pgUser.Nickname)
+	err = r.db.QueryRow(getUser, nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 	if err != nil {
 		return user, fmt.Errorf("error: %w, nickname: %s", _user.ErrNotFound, nickname)
 	}
 
-	return *toModel(&pgUser), err
+	return user, err
 }
 
-func (r *Repository) ChangeUser(newUser *models.User) (user models.User, err error) {
-	var pgUser User
-
-	var oldUser User
+func (r *repository) ChangeUser(newUser *models.User) (user models.User, err error) {
+	var oldUser models.User
 
 	getOldUser := `
 		SELECT about, email, fullname
 		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-	err = r.DB.QueryRow(getOldUser, newUser.Nickname).Scan(&oldUser.About, &oldUser.Email, &oldUser.FullName)
+	err = r.db.QueryRow(getOldUser, newUser.Nickname).Scan(&oldUser.About, &oldUser.Email, &oldUser.FullName)
 	if err != nil {
 		return user, fmt.Errorf("error: %w, nickname: %s", _user.ErrNotFound, newUser.Nickname)
 	}
@@ -112,17 +106,15 @@ func (r *Repository) ChangeUser(newUser *models.User) (user models.User, err err
 			newUser.FullName = oldUser.FullName
 		}
 
-		pgUser = *toPostgres(newUser)
-
 		changeUser := `UPDATE "user"
 				   SET about = $1, email = $2, fullname = $3
 				   WHERE LOWER(nickname) = LOWER($4)`
-		_, err = r.DB.Exec(changeUser, pgUser.About, pgUser.Email, pgUser.FullName, pgUser.Nickname)
+		_, err = r.db.Exec(changeUser, newUser.About, newUser.Email, newUser.FullName, newUser.Nickname)
 		if err != nil {
 			var userCount uint64
 
 			getUserCount := `SELECT COUNT(*) FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-			err = r.DB.QueryRow(getUserCount, newUser.Nickname).Scan(&userCount)
+			err = r.db.QueryRow(getUserCount, newUser.Nickname).Scan(&userCount)
 			if err != nil {
 				return user, err
 			}
@@ -138,19 +130,19 @@ func (r *Repository) ChangeUser(newUser *models.User) (user models.User, err err
 	getUser := `
 		SELECT about, email, fullname, nickname
 		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-	err = r.DB.QueryRow(getUser, newUser.Nickname).Scan(&pgUser.About, &pgUser.Email, &pgUser.FullName, &pgUser.Nickname)
+	err = r.db.QueryRow(getUser, newUser.Nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 	if err != nil {
 		return user, err
 	}
 
-	return *toModel(&pgUser), nil
+	return user, err
 }
 
-func (r *Repository) GetForumUsers(forumSlug string, limit uint64, since string, desc bool) (users []models.User, err error) {
+func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string, desc bool) (users []models.User, err error) {
 	var hasForum bool
 
 	checkForum := "SELECT COUNT(*) <> 0 FROM forum WHERE LOWER(slug) = LOWER($1)"
-	err = r.DB.QueryRow(checkForum, forumSlug).Scan(&hasForum)
+	err = r.db.QueryRow(checkForum, forumSlug).Scan(&hasForum)
 	if err != nil || !hasForum {
 		return users, _user.ErrForumNotFound
 	}
@@ -173,7 +165,7 @@ func (r *Repository) GetForumUsers(forumSlug string, limit uint64, since string,
 		getUsers += " DESC"
 	}
 
-	rows, err := r.DB.Query(getUsers, forumSlug)
+	rows, err := r.db.Query(getUsers, forumSlug)
 	if err != nil {
 		return users, err
 	}
@@ -183,7 +175,7 @@ func (r *Repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	var isSince bool
 
 	for rows.Next() && (limit == 0 || userCount < limit) {
-		var user User
+		var user models.User
 
 		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 		if err != nil {
@@ -191,7 +183,7 @@ func (r *Repository) GetForumUsers(forumSlug string, limit uint64, since string,
 		}
 
 		if since == "" || isSince {
-			users = append(users, *toModel(&user))
+			users = append(users, user)
 			userCount++
 		} else if strings.ToLower(user.Nickname) == strings.ToLower(since) {
 			isSince = true
