@@ -16,32 +16,6 @@ func NewUserRepository(db *sql.DB) *repository {
 	return &repository{db: db}
 }
 
-//type User struct {
-//	ID       uint64
-//	About    string
-//	Email    string
-//	FullName string
-//	Nickname string
-//}
-//
-//func toPostgres(user *models.User) *User {
-//	return &User{
-//		About:    user.About,
-//		Email:    user.Email,
-//		FullName: user.FullName,
-//		Nickname: user.Nickname,
-//	}
-//}
-//
-//func toModel(user *User) *models.User {
-//	return &models.User{
-//		About:    user.About,
-//		Email:    user.Email,
-//		FullName: user.FullName,
-//		Nickname: user.Nickname,
-//	}
-//}
-
 func (r *repository) CreateUser(newUser *models.User) (users []models.User, err error) {
 	createUser := `INSERT INTO "user" (about, email, fullname, nickname)
 				   VALUES ($1, $2, $3, $4)`

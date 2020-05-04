@@ -10,5 +10,5 @@ type Thread struct {
 	Message string    `json:"message,omitempty"`
 	Slug    string    `json:"slug,omitempty"`
 	Title   string    `json:"title,omitempty"`
-	Votes   uint64    `json:"votes,omitempty"`
+	Votes   int64    `json:"votes,omitempty"`
 }

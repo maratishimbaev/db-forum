@@ -109,12 +109,10 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 			return threads, err
 		}
 
-		var voteCount uint64
-
-		getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
-		err = r.db.QueryRow(getVotes, thread.ID).Scan(&voteCount)
-
-		thread.Votes = voteCount
+		getVotes := `SELECT SUM(voice) FROM vote WHERE thread = $1`
+		if err := r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes); err != nil {
+			thread.Votes = 0
+		}
 
 		threads = append(threads, thread)
 	}
@@ -139,7 +137,9 @@ func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) 
 	}
 
 	getVotes := `SELECT SUM(voice) FROM vote WHERE thread = $1`
-	_ = r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes)
+	if err := r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes); err != nil {
+		thread.Votes = 0
+	}
 
 	return thread, err
 }
@@ -156,8 +156,10 @@ func (r *repository) GetThreadBySlug(slug string) (thread models.Thread, err err
 		return thread, _thread.NotFound
 	}
 
-	getVotes := `SELECT COUNT(*) FROM vote WHERE thread = $1`
-	_ = r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes)
+	getVotes := `SELECT SUM(voice) FROM vote WHERE thread = $1`
+	if err := r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes); err != nil {
+		thread.Votes = 0
+	}
 
 	return thread, err
 }
@@ -234,18 +236,12 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 
 func (r *repository) VoteThread(slugOrID string, vote models.Vote) (thread models.Thread, err error) {
 	var threadID uint64
-
-	var isThreadID bool
-	checkThreadID := `SELECT COUNT(*) <> 0 FROM thread WHERE id = $1`
-	err = r.db.QueryRow(checkThreadID, slugOrID).Scan(&isThreadID)
-
-	if isThreadID {
-		if threadID, err = strconv.ParseUint(slugOrID, 10, 64); err != nil {
-			return thread, err
-		}
-	} else {
-		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
-		if err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
+	getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
+	err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID)
+	if err != nil {
+		getThreadID = `SELECT id FROM thread WHERE id = $1`
+		err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID)
+		if err != nil {
 			return thread, _thread.NotFound
 		}
 	}
