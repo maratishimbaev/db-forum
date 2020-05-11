@@ -164,15 +164,6 @@ func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err er
 func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
 	threadID, err := r.GetThreadID(threadSlugOrID)
 	if err != nil {
-		return posts, err
-	}
-
-	checkThread := `SELECT COUNT(*) <> 0 FROM thread WHERE id = $1`
-
-	var hasThread bool
-
-	err = r.db.QueryRow(checkThread, threadID).Scan(&hasThread)
-	if err != nil || !hasThread {
 		return posts, _post.ThreadNotFound
 	}
 
@@ -193,8 +184,6 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 
 	now := time.Now()
 
-	checkAuthor := `SELECT COUNT(*) <> 0 FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-
 	for _, newPost := range newPosts {
 		newPost.Thread = threadID
 
@@ -207,19 +196,11 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 			}
 		}
 
-		var postID uint64
-		var hasAuthor bool
-
-		err = r.db.QueryRow(checkAuthor, newPost.Author).Scan(&hasAuthor)
-		if err != nil || !hasAuthor {
-			return posts, _post.NotFound
-		}
-
 		var authorID uint64
 		getAuthorID := `SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 		err = r.db.QueryRow(getAuthorID, newPost.Author).Scan(&authorID)
 		if err != nil {
-			return posts, errors.New("can't find author, error: " + err.Error())
+			return posts, _post.NotFound
 		}
 
 		var forumID uint64
@@ -229,6 +210,7 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 			return posts, errors.New("can't find forum, error: " + err.Error())
 		}
 
+		var postID uint64
 		if err = r.db.QueryRow(createPost, authorID, now, forumID, false, newPost.Message, newPost.Parent, newPost.Thread).
 			Scan(&postID); err != nil {
 			return posts, errors.New("can't create post, error: " + err.Error())

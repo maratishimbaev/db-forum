@@ -65,22 +65,28 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 
 	if desc {
 		getThreads = `
-			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug
+			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
 			FROM thread t
 			JOIN "user" u ON t.author = u.id
 			JOIN forum f ON t.forum = f.id
-			WHERE t.forum = $1 AND t.created <= $2 ORDER BY t.created DESC`
+			LEFT JOIN vote v ON t.id = v.thread
+			WHERE t.forum = $1 AND t.created <= $2
+			GROUP BY t.id, u.nickname, f.slug
+			ORDER BY t.created DESC`
 
 		if since == (time.Time{}) {
 			since = time.Now().AddDate(1000, 0, 0)
 		}
 	} else {
 		getThreads = `
-			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug
+			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
 			FROM thread t
 			JOIN "user" u ON t.author = u.id
 			JOIN forum f ON t.forum = f.id
-			WHERE t.forum = $1 AND t.created >= $2 ORDER BY t.created`
+			LEFT JOIN vote v ON t.id = v.thread
+			WHERE t.forum = $1 AND t.created >= $2
+			GROUP BY t.id, u.nickname, f.slug
+			ORDER BY t.created`
 
 		if since == (time.Time{}) {
 			since = time.Now().AddDate(-1000, 0, 0)
@@ -105,13 +111,8 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 		var thread models.Thread
 
 		if err = rows.Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title,
-			&thread.Forum); err != nil {
+			&thread.Forum, &thread.Votes); err != nil {
 			return threads, err
-		}
-
-		getVotes := `SELECT SUM(voice) FROM vote WHERE thread = $1`
-		if err := r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes); err != nil {
-			thread.Votes = 0
 		}
 
 		threads = append(threads, thread)
@@ -126,19 +127,17 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 
 func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug
+		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
 		FROM thread t
 		JOIN "user" u ON t.author = u.id
 		JOIN forum f ON t.forum = f.id
-		WHERE t.id = $1`
+		LEFT JOIN vote v ON t.id = v.thread
+		WHERE t.id = $1
+		GROUP BY t.id, u.nickname, f.slug`
 	if err = r.db.QueryRow(getThread, id).
-		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum); err != nil {
+		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
+			&thread.Votes); err != nil {
 		return thread, _thread.NotFound
-	}
-
-	getVotes := `SELECT SUM(voice) FROM vote WHERE thread = $1`
-	if err := r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes); err != nil {
-		thread.Votes = 0
 	}
 
 	return thread, err
@@ -146,19 +145,17 @@ func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) 
 
 func (r *repository) GetThreadBySlug(slug string) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug
+		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
 		FROM thread t
 		JOIN "user" u ON t.author = u.id
 		JOIN forum f ON t.forum = f.id
-		WHERE LOWER(t.slug) = LOWER($1)`
+		LEFT JOIN vote v ON t.id = v.thread
+		WHERE LOWER(t.slug) = LOWER($1)
+		GROUP BY t.id, u.nickname, f.slug`
 	if err = r.db.QueryRow(getThread, slug).
-		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum); err != nil {
+		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
+			&thread.Votes); err != nil {
 		return thread, _thread.NotFound
-	}
-
-	getVotes := `SELECT SUM(voice) FROM vote WHERE thread = $1`
-	if err := r.db.QueryRow(getVotes, thread.ID).Scan(&thread.Votes); err != nil {
-		thread.Votes = 0
 	}
 
 	return thread, err
