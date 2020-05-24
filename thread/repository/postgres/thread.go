@@ -127,13 +127,11 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 
 func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
+		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
 		FROM thread t
 		JOIN "user" u ON t.author = u.id
 		JOIN forum f ON t.forum = f.id
-		LEFT JOIN vote v ON t.id = v.thread
-		WHERE t.id = $1
-		GROUP BY t.id, u.nickname, f.slug`
+		WHERE t.id = $1`
 	if err = r.db.QueryRow(getThread, id).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
 			&thread.Votes); err != nil {
@@ -145,13 +143,11 @@ func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) 
 
 func (r *repository) GetThreadBySlug(slug string) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
+		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
 		FROM thread t
 		JOIN "user" u ON t.author = u.id
 		JOIN forum f ON t.forum = f.id
-		LEFT JOIN vote v ON t.id = v.thread
-		WHERE LOWER(t.slug) = LOWER($1)
-		GROUP BY t.id, u.nickname, f.slug`
+		WHERE LOWER(t.slug) = LOWER($1)`
 	if err = r.db.QueryRow(getThread, slug).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
 			&thread.Votes); err != nil {

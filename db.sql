@@ -10,11 +10,35 @@ SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
-SELECT pg_catalog.set_config('search_path', '', false);
 SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
+
+--
+-- Name: votes_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.votes_add_func() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+begin
+    raise notice 'qq';
+    if (tg_op = 'INSERT') then
+        update thread set votes = votes + new.voice where id = new.thread;
+        raise notice 'qqq';
+        return new;
+    elsif (tg_op = 'UPDATE') then
+        update thread set votes = votes - old.voice + new.voice where id = new.thread;
+        raise notice 'qqqq';
+        return new;
+    end if;
+    return null;
+end
+$$;
+
+
+ALTER FUNCTION public.votes_add_func() OWNER TO postgres;
 
 SET default_tablespace = '';
 
@@ -25,10 +49,10 @@ SET default_table_access_method = heap;
 --
 
 CREATE TABLE public.forum (
-    id integer NOT NULL,
-    slug character varying(256) NOT NULL,
-    title character varying(256) NOT NULL,
-    "user" integer NOT NULL
+                              id integer NOT NULL,
+                              slug character varying(256) NOT NULL,
+                              title character varying(256) NOT NULL,
+                              "user" integer NOT NULL
 );
 
 
@@ -61,14 +85,14 @@ ALTER SEQUENCE public.forum_id_seq OWNED BY public.forum.id;
 --
 
 CREATE TABLE public.post (
-    id integer NOT NULL,
-    author integer NOT NULL,
-    created timestamp with time zone,
-    forum integer,
-    is_edited boolean NOT NULL,
-    message text NOT NULL,
-    parent integer,
-    thread integer
+                             id integer NOT NULL,
+                             author integer NOT NULL,
+                             created timestamp with time zone,
+                             forum integer,
+                             is_edited boolean NOT NULL,
+                             message text NOT NULL,
+                             parent integer,
+                             thread integer
 );
 
 
@@ -101,13 +125,14 @@ ALTER SEQUENCE public.post_id_seq OWNED BY public.post.id;
 --
 
 CREATE TABLE public.thread (
-    id integer NOT NULL,
-    author integer NOT NULL,
-    created timestamp with time zone,
-    forum integer,
-    message text NOT NULL,
-    slug character varying(256),
-    title character varying(128) NOT NULL
+                               id integer NOT NULL,
+                               author integer NOT NULL,
+                               created timestamp with time zone,
+                               forum integer,
+                               message text NOT NULL,
+                               slug character varying(256),
+                               title character varying(128) NOT NULL,
+                               votes integer DEFAULT 0
 );
 
 
@@ -140,11 +165,11 @@ ALTER SEQUENCE public.thread_id_seq OWNED BY public.thread.id;
 --
 
 CREATE TABLE public."user" (
-    id integer NOT NULL,
-    about text,
-    email character varying(256) NOT NULL,
-    fullname character varying(128) NOT NULL,
-    nickname character varying(64)
+                               id integer NOT NULL,
+                               about text,
+                               email character varying(256) NOT NULL,
+                               fullname character varying(128) NOT NULL,
+                               nickname character varying(64)
 );
 
 
@@ -177,9 +202,9 @@ ALTER SEQUENCE public.user_id_seq OWNED BY public."user".id;
 --
 
 CREATE TABLE public.vote (
-    "user" integer NOT NULL,
-    voice integer NOT NULL,
-    thread integer NOT NULL
+                             "user" integer NOT NULL,
+                             voice integer NOT NULL,
+                             thread integer NOT NULL
 );
 
 
@@ -214,74 +239,6 @@ ALTER TABLE ONLY public."user" ALTER COLUMN id SET DEFAULT nextval('public.user_
 
 
 --
--- Data for Name: forum; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-COPY public.forum (id, slug, title, "user") FROM stdin;
-\.
-
-
---
--- Data for Name: post; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-COPY public.post (id, author, created, forum, is_edited, message, parent, thread) FROM stdin;
-\.
-
-
---
--- Data for Name: thread; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-COPY public.thread (id, author, created, forum, message, slug, title) FROM stdin;
-\.
-
-
---
--- Data for Name: user; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-COPY public."user" (id, about, email, fullname, nickname) FROM stdin;
-\.
-
-
---
--- Data for Name: vote; Type: TABLE DATA; Schema: public; Owner: postgres
---
-
-COPY public.vote ("user", voice, thread) FROM stdin;
-\.
-
-
---
--- Name: forum_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
---
-
-SELECT pg_catalog.setval('public.forum_id_seq', 1, true);
-
-
---
--- Name: post_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
---
-
-SELECT pg_catalog.setval('public.post_id_seq', 18, true);
-
-
---
--- Name: thread_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
---
-
-SELECT pg_catalog.setval('public.thread_id_seq', 3, true);
-
-
---
--- Name: user_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
---
-
-SELECT pg_catalog.setval('public.user_id_seq', 7, true);
-
-
---
 -- Name: forum forum_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -306,6 +263,14 @@ ALTER TABLE ONLY public.thread
 
 
 --
+-- Name: vote unique_user_and_thread; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.vote
+    ADD CONSTRAINT unique_user_and_thread UNIQUE ("user", thread);
+
+
+--
 -- Name: user user_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -318,6 +283,13 @@ ALTER TABLE ONLY public."user"
 --
 
 CREATE UNIQUE INDEX forum_lower_slug_key ON public.forum USING btree (lower((slug)::text));
+
+
+--
+-- Name: index_vote_thread_user; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX index_vote_thread_user ON public.vote USING btree (thread, "user");
 
 
 --
@@ -346,6 +318,13 @@ CREATE UNIQUE INDEX user_lower_nickname_key ON public."user" USING btree (lower(
 --
 
 CREATE UNIQUE INDEX vote_user_and_thread_key ON public.vote USING btree ("user", thread);
+
+
+--
+-- Name: vote votes_add; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER votes_add AFTER INSERT OR UPDATE ON public.vote FOR EACH ROW EXECUTE PROCEDURE public.votes_add_func();
 
 
 --
@@ -415,4 +394,3 @@ ALTER TABLE ONLY public.vote
 --
 -- PostgreSQL database dump complete
 --
-
