@@ -40,8 +40,11 @@ RUN /etc/init.d/postgresql start && \
 # Configurate postgres
 RUN echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/$PGVERSION/main/pg_hba.conf
 RUN echo "listen_addresses='*'" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
-RUN echo "fsync=off" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
-RUN echo "full_page_writes=off" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
+RUN echo "fsync='off'" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
+RUN echo "full_page_writes='off'" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
+RUN echo "synchronous_commit='off'" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
+RUN echo "log_statement='none'" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
+RUN echo "log_min_duration_statement='-1'" >> /etc/postgresql/$PGVERSION/main/postgresql.conf
 
 # Expose postgres port
 EXPOSE 5432

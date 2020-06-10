@@ -6,6 +6,7 @@ import (
 	"forum/models"
 	_post "forum/post"
 	"log"
+	"strconv"
 	"time"
 )
 
@@ -162,9 +163,23 @@ func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err er
 }
 
 func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
-	threadID, err := r.GetThreadID(threadSlugOrID)
+	var threadID uint64
+	var isID bool
+
+	threadID, err = strconv.ParseUint(threadSlugOrID, 10, 64)
 	if err != nil {
-		return posts, _post.ThreadNotFound
+		threadID = 0
+	}
+
+	threadExists := `SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)`
+	if err = r.db.QueryRow(threadExists, threadID).Scan(&isID); err != nil {
+		return posts, err
+	}
+	if !isID {
+		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
+		if err = r.db.QueryRow(getThreadID, threadSlugOrID).Scan(&threadID); err != nil {
+			return posts, _post.ThreadNotFound
+		}
 	}
 
 	if len(newPosts) == 0 {

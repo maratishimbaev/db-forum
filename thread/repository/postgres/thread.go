@@ -229,30 +229,49 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 
 func (r *repository) VoteThread(slugOrID string, vote models.Vote) (thread models.Thread, err error) {
 	var threadID uint64
-	getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
-	err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID)
+	var isID bool
+
+	threadID, err = strconv.ParseUint(slugOrID, 10, 64)
 	if err != nil {
-		getThreadID = `SELECT id FROM thread WHERE id = $1`
-		err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID)
-		if err != nil {
+		threadID = 0
+	}
+
+	threadExists := `SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)`
+	if err = r.db.QueryRow(threadExists, threadID).Scan(&isID); err != nil {
+		return thread, err
+	}
+	if !isID {
+		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
+		if err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
 			return thread, _thread.NotFound
 		}
 	}
 
-	var userID uint64
-	getUserID := `SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-	err = r.db.QueryRow(getUserID, vote.Nickname).Scan(&userID)
+	createOrUpdateVote := `
+		INSERT INTO vote (voice, "user", thread)
+		SELECT $1, id, $3 FROM "user" WHERE LOWER(nickname) = LOWER($2)
+		ON CONFLICT ON CONSTRAINT unique_user_and_thread DO
+		UPDATE SET voice = $1`
+	res, err := r.db.Exec(createOrUpdateVote, vote.Voice, vote.Nickname, threadID)
 	if err != nil {
 		return thread, _thread.NotFound
 	}
-
-	createVote := `INSERT INTO vote ("user", voice, thread) VALUES ($1, $2, $3)`
-	if _, err = r.db.Exec(createVote, userID, vote.Voice, threadID); err != nil {
-		changeVote := `UPDATE vote SET voice = $1 WHERE "user" = $2 AND thread = $3`
-		if _, err = r.db.Exec(changeVote, vote.Voice, userID, threadID); err != nil {
-			return thread, err
-		}
+	count, err := res.RowsAffected()
+	if err != nil || count == 0 {
+		return thread, _thread.NotFound
 	}
 
-	return r.GetThreadByID(threadID)
+	getThread := `
+		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
+		FROM thread t
+		JOIN "user" u ON t.author = u.id
+		JOIN forum f ON t.forum = f.id
+		WHERE t.id = $1`
+	if err = r.db.QueryRow(getThread, threadID).
+		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
+			&thread.Votes); err != nil {
+		return thread, _thread.NotFound
+	}
+
+	return thread, err
 }
