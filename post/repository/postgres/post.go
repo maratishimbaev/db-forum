@@ -3,10 +3,13 @@ package postPostgres
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"forum/models"
 	_post "forum/post"
+	"github.com/lib/pq"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -162,6 +165,14 @@ func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err er
 	return threadID, err
 }
 
+func replaceSQL(old, pattern string) string {
+	count := strings.Count(old, pattern)
+	for i := 1; i <= count; i++ {
+		old = strings.Replace(old, pattern, "$" + strconv.Itoa(i), 1)
+	}
+	return old
+}
+
 func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
 	var threadID uint64
 	var isID bool
@@ -186,18 +197,10 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 		return []models.Post{}, err
 	}
 
-	getThread := `SELECT thread FROM post WHERE id = $1`
-	createPost := `
-		INSERT INTO post (author, created, forum, is_edited, message, parent, thread)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
-	getPost := `
-		SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, p.thread
-		FROM post p
-		LEFT JOIN "user" u ON p.author = u.id
-		LEFT JOIN forum f ON p.forum = f.id
-		WHERE p.id = $1`
-
 	now := time.Now()
+
+	createPost := `INSERT INTO post (author, created, forum, is_edited, message, parent, thread) VALUES`
+	var vals []interface{}
 
 	for _, newPost := range newPosts {
 		newPost.Thread = threadID
@@ -205,36 +208,71 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 		if newPost.Parent != 0 {
 			var parentThread uint64
 
-			err = r.db.QueryRow(getThread, newPost.Parent).Scan(&parentThread)
+			err = r.db.QueryRow(`SELECT thread FROM post WHERE id = $1`, newPost.Parent).Scan(&parentThread)
 			if err != nil || parentThread != newPost.Thread {
 				return posts, _post.ParentNotInThread
 			}
 		}
 
 		var authorID uint64
-		getAuthorID := `SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-		err = r.db.QueryRow(getAuthorID, newPost.Author).Scan(&authorID)
+		err = r.db.QueryRow(`SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`, newPost.Author).Scan(&authorID)
 		if err != nil {
 			return posts, _post.NotFound
 		}
 
 		var forumID uint64
-		getForumID := `SELECT forum FROM thread WHERE id = $1`
-		err = r.db.QueryRow(getForumID, threadID).Scan(&forumID)
+		err = r.db.QueryRow(`SELECT forum FROM thread WHERE id = $1`, threadID).Scan(&forumID)
 		if err != nil {
 			return posts, errors.New("can't find forum, error: " + err.Error())
 		}
 
-		var postID uint64
-		if err = r.db.QueryRow(createPost, authorID, now, forumID, false, newPost.Message, newPost.Parent, newPost.Thread).
-			Scan(&postID); err != nil {
-			return posts, errors.New("can't create post, error: " + err.Error())
-		}
+		createPost += " (?, ?, ?, ?, ?, ?, ?),"
+		vals = append(vals, authorID, now, forumID, false, newPost.Message, newPost.Parent, newPost.Thread)
+	}
 
+	createPost = createPost[0 : len(createPost)-1]
+	createPost += ` RETURNING id`
+	createPost = replaceSQL(createPost, "?")
+
+	statement, err := r.db.Prepare(createPost)
+	if err != nil {
+		return posts, errors.New("statement error: " + err.Error())
+	}
+	idRows, err := statement.Query(vals...)
+	if err != nil {
+		return posts, errors.New("idRows error: " + err.Error())
+	}
+
+	var ids []uint64
+	for idRows.Next() {
+		var id uint64
+		err = idRows.Scan(&id)
+		if err != nil {
+			return posts, err
+		}
+		ids = append(ids, id)
+	}
+
+	getPosts := `
+		SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, thread
+		FROM post p
+		LEFT JOIN "user" u ON p.author = u.id
+		LEFT JOIN forum f ON p.forum = f.id
+		WHERE p.id = ANY($1)
+		ORDER BY id`
+	rows, err := r.db.Query(getPosts, pq.Array(ids))
+	if err != nil {
+		fmt.Printf("getPosts: %s\n", getPosts)
+		return posts, errors.New("rows error: " + err.Error())
+	}
+
+	for rows.Next() {
 		var post models.Post
 
-		err = r.db.QueryRow(getPost, postID).
-			Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread)
+		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread)
+		if err != nil {
+			return posts, err
+		}
 
 		posts = append(posts, post)
 	}
