@@ -16,6 +16,50 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: posts_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.posts_add_func() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+begin
+    if (tg_op = 'INSERT') then
+        update forum set posts = posts + 1 where id = new.forum;
+        return new;
+    elsif (tg_op = 'DELETE') then
+        update forum set posts = posts - 1 where id = old.forum;
+        return old;
+    end if;
+    return null;
+end
+$$;
+
+
+ALTER FUNCTION public.posts_add_func() OWNER TO postgres;
+
+--
+-- Name: threads_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.threads_add_func() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+begin
+    if (tg_op = 'INSERT') then
+        update forum set threads = threads + 1 where id = new.forum;
+        return new;
+    elsif (tg_op = 'DELETE') then
+        update forum set threads = threads - 1 where id = old.forum;
+        return old;
+    end if;
+    return null;
+end
+$$;
+
+
+ALTER FUNCTION public.threads_add_func() OWNER TO postgres;
+
+--
 -- Name: votes_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -52,7 +96,9 @@ CREATE TABLE public.forum (
                               id integer NOT NULL,
                               slug character varying(256) NOT NULL,
                               title character varying(256) NOT NULL,
-                              "user" integer NOT NULL
+                              "user" integer NOT NULL,
+                              posts integer DEFAULT 0,
+                              threads integer DEFAULT 0
 );
 
 
@@ -318,6 +364,20 @@ CREATE UNIQUE INDEX user_lower_nickname_key ON public."user" USING btree (lower(
 --
 
 CREATE UNIQUE INDEX vote_user_and_thread_key ON public.vote USING btree ("user", thread);
+
+
+--
+-- Name: post posts_add; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER posts_add AFTER INSERT OR UPDATE ON public.post FOR EACH ROW EXECUTE PROCEDURE public.posts_add_func();
+
+
+--
+-- Name: thread threads_add; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER threads_add AFTER INSERT OR UPDATE ON public.thread FOR EACH ROW EXECUTE PROCEDURE public.threads_add_func();
 
 
 --
