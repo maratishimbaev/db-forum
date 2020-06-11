@@ -55,7 +55,8 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 			SELECT about, email, fullname, nickname
 			FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 		if err = r.db.QueryRow(getAuthor, postFull.Post.Author).
-			Scan(&postFull.Author.About, &postFull.Author.Email, &postFull.Author.FullName, &postFull.Author.Nickname); err != nil {
+			Scan(&postFull.Author.About, &postFull.Author.Email, &postFull.Author.FullName,
+				&postFull.Author.Nickname); err != nil {
 			return postFull, err
 		}
 	}
@@ -65,33 +66,14 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 		postFull.Forum = &models.Forum{}
 
 		getForum := `
-			SELECT f.slug, f.title, u.nickname
+			SELECT f.slug, f.title, u.nickname, f.posts, f.threads
 			FROM forum f
 			JOIN "user" u ON f.user = u.id
 			WHERE LOWER(f.slug) = LOWER($1)`
 		if err = r.db.QueryRow(getForum, postFull.Post.Forum).
-			Scan(&postFull.Forum.Slug, &postFull.Forum.Title, &postFull.Forum.User); err != nil {
+			Scan(&postFull.Forum.Slug, &postFull.Forum.Title, &postFull.Forum.User, &postFull.Forum.Posts,
+				&postFull.Forum.Threads); err != nil {
 			return postFull, err
-		}
-
-		getPostCount := `
-			SELECT COUNT(*)
-			FROM post p
-			JOIN forum f ON p.forum = f.id
-			WHERE LOWER(f.slug) = LOWER($1)`
-		err = r.db.QueryRow(getPostCount, postFull.Forum.Slug).Scan(&postFull.Forum.Posts)
-		if err != nil {
-			return postFull, errors.New("can't get post count, error: " + err.Error())
-		}
-
-		getThreadCount := `
-			SELECT COUNT(*)
-			FROM thread t
-			JOIN forum f ON t.forum = f.id
-			WHERE LOWER(f.slug) = LOWER($1)`
-		err = r.db.QueryRow(getThreadCount, postFull.Forum.Slug).Scan(&postFull.Forum.Threads)
-		if err != nil {
-			return postFull, errors.New("can't get thread count, error: " + err.Error())
 		}
 	}
 
@@ -118,7 +100,7 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 func (r *repository) ChangePost(newPost *models.Post) (post models.Post, err error) {
 	var hasPost bool
 
-	checkPost := `SELECT COUNT(*) <> 0 FROM post WHERE id = $1`
+	checkPost := `SELECT EXISTS(SELECT 1 FROM post WHERE id = $1)`
 	if err = r.db.QueryRow(checkPost, newPost.ID).Scan(&hasPost); err != nil || !hasPost {
 		return post, _post.NotFound
 	}

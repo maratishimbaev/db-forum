@@ -129,11 +129,11 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 			WHERE LOWER(f.slug) = LOWER($1)
 			UNION
 			SELECT about, email, fullname, nickname FROM thread t
-			JOIN "user" u2 ON t.author = u2.id
+			JOIN "user" u ON t.author = u.id
 			JOIN forum f ON t.forum = f.id
 			WHERE LOWER(f.slug) = LOWER($1)
 			ORDER BY nickname
-		) users ORDER BY LOWER(users.nickname)`
+		) users ORDER BY LOWER(users.nickname) COLLATE "C"`
 
 	if desc {
 		getUsers += " DESC"
@@ -162,8 +162,6 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 		} else if strings.ToLower(user.Nickname) == strings.ToLower(since) {
 			isSince = true
 		}
-
-		fmt.Printf("nickname: %s, isSince: %t, userCount: %d, limit: %d", user.Nickname, isSince, userCount, limit)
 	}
 
 	if len(users) == 0 {
