@@ -65,13 +65,11 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 
 	if desc {
 		getThreads = `
-			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
+			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
 			FROM thread t
 			JOIN "user" u ON t.author = u.id
 			JOIN forum f ON t.forum = f.id
-			LEFT JOIN vote v ON t.id = v.thread
 			WHERE t.forum = $1 AND t.created <= $2
-			GROUP BY t.id, u.nickname, f.slug
 			ORDER BY t.created DESC`
 
 		if since == (time.Time{}) {
@@ -79,13 +77,11 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 		}
 	} else {
 		getThreads = `
-			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, COALESCE(SUM(v.voice), 0)
+			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
 			FROM thread t
 			JOIN "user" u ON t.author = u.id
 			JOIN forum f ON t.forum = f.id
-			LEFT JOIN vote v ON t.id = v.thread
 			WHERE t.forum = $1 AND t.created >= $2
-			GROUP BY t.id, u.nickname, f.slug
 			ORDER BY t.created`
 
 		if since == (time.Time{}) {

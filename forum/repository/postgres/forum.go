@@ -29,7 +29,7 @@ func (r *repository) CreateForum(newForum *models.Forum) (forum models.Forum, er
 	if err != nil {
 		var hasUser bool
 
-		checkUser := `SELECT COUNT(*) <> 0 FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+		checkUser := `SELECT EXISTS(SELECT 1 FROM "user" WHERE LOWER(nickname) = LOWER($1))`
 		err = r.db.QueryRow(checkUser, newForum.User).Scan(&hasUser)
 		if err != nil {
 			return forum, err
@@ -58,7 +58,7 @@ func (r *repository) CreateForum(newForum *models.Forum) (forum models.Forum, er
 func (r *repository) GetForum(slug string) (forum models.Forum, err error) {
 	getForum := `SELECT f.title, u.nickname, f.slug, f.posts, f.threads
 				 FROM forum f
-				 LEFT JOIN "user" u ON f.user = u.id
+				 JOIN "user" u ON f.user = u.id
 				 WHERE LOWER(f.slug) = LOWER($1)`
 	err = r.db.QueryRow(getForum, slug).Scan(&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"forum/forum/delivery/http"
 	"forum/forum/repository/postgres"
 	"forum/forum/usecase"
+	m "forum/middleware"
 	"forum/post"
 	postHttp "forum/post/delivery/http"
 	postPostgres "forum/post/repository/postgres"
@@ -24,7 +25,6 @@ import (
 	"forum/user/repository/postgres"
 	"forum/user/usecase"
 	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
 	_ "github.com/lib/pq"
 	"log"
 	"net/http"
@@ -79,9 +79,11 @@ func initDB() *sql.DB {
 func (a *App) Run() (err error) {
 	e := echo.New()
 
-	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Format: "method=${method}, uri=${uri}, status=${status}\n",
-	}))
+	//e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+	//	Format: "method=${method}, uri=${uri}, status=${status}\n",
+	//}))
+
+	e.Use(m.TimeMiddleware)
 
 	userHttp.RegisterHTTPEndpoints(e, a.userUseCase)
 	forumHttp.RegisterHTTPEndpoints(e, a.forumUseCase)

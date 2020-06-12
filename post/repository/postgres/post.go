@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"forum/models"
 	_post "forum/post"
+	"forum/utils"
 	"github.com/lib/pq"
-	"log"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -124,8 +123,8 @@ func (r *repository) ChangePost(newPost *models.Post) (post models.Post, err err
 	getPost := `
 		SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, p.thread
 		FROM post p
-		LEFT JOIN "user" u ON p.author = u.id
-		LEFT JOIN forum f ON p.forum = f.id
+		JOIN "user" u ON p.author = u.id
+		JOIN forum f ON p.forum = f.id
 		WHERE p.id = $1`
 	err = r.db.QueryRow(getPost, newPost.ID).
 		Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread)
@@ -145,14 +144,6 @@ func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err er
 	}
 
 	return threadID, err
-}
-
-func replaceSQL(old, pattern string) string {
-	count := strings.Count(old, pattern)
-	for i := 1; i <= count; i++ {
-		old = strings.Replace(old, pattern, "$" + strconv.Itoa(i), 1)
-	}
-	return old
 }
 
 func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
@@ -214,7 +205,7 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 
 	createPost = createPost[0 : len(createPost)-1]
 	createPost += ` RETURNING id`
-	createPost = replaceSQL(createPost, "?")
+	createPost = utils.ReplaceSQL(createPost, "?", 1)
 
 	statement, err := r.db.Prepare(createPost)
 	if err != nil {
@@ -238,8 +229,8 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	getPosts := `
 		SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, thread
 		FROM post p
-		LEFT JOIN "user" u ON p.author = u.id
-		LEFT JOIN forum f ON p.forum = f.id
+		JOIN "user" u ON p.author = u.id
+		JOIN forum f ON p.forum = f.id
 		WHERE p.id = ANY($1)
 		ORDER BY id`
 	rows, err := r.db.Query(getPosts, pq.Array(ids))
@@ -266,8 +257,8 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 	getPosts := `
 		SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent 
 		FROM post p 
-		LEFT JOIN "user" u ON p.author = u.id
-		LEFT JOIN forum f ON p.forum = f.id
+		JOIN "user" u ON p.author = u.id
+		JOIN forum f ON p.forum = f.id
 		WHERE p.thread = $1`
 
 	if desc {
@@ -312,7 +303,11 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 }
 
 func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
-	getParentPosts := "SELECT id FROM post WHERE thread = $1 AND parent = 0 ORDER BY created, id"
+	getParentPosts := `
+		SELECT id
+		FROM post
+		WHERE thread = $1 AND parent = 0
+		ORDER BY created, id`
 
 	parentRows, err := r.db.Query(getParentPosts, threadID)
 	if err != nil {
@@ -322,22 +317,26 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 
 	getChildPosts := `
 		WITH RECURSIVE children (id, author, created, forum, is_edited, message, parent, path) AS (
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, lpad(p.id::text, 5, '0')
+			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, lpad(p.id::text, 7, '0')
 			FROM post p
-			LEFT JOIN "user" u ON p.author = u.id
-			LEFT JOIN forum f ON p.forum = f.id
+			JOIN "user" u ON p.author = u.id
+			JOIN forum f ON p.forum = f.id
 			WHERE p.id = $1
 		UNION ALL
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, c.path || '.' || lpad(p.id::text, 5, '0')
+			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, c.path || '.' || lpad(p.id::text, 7, '0')
 			FROM post p
-			INNER JOIN children c ON p.parent = c.id
-			LEFT JOIN "user" u ON p.author = u.id
-			LEFT JOIN forum f ON p.forum = f.id
+			JOIN children c ON p.parent = c.id
+			JOIN "user" u ON p.author = u.id
+			JOIN forum f ON p.forum = f.id
 		)
 		SELECT id, author, created, forum, is_edited, message, parent FROM children
 		ORDER BY path`
 
-	for parentRows.Next() {
+	var isSince bool
+	var count uint64
+
+MainFor:
+	for parentRows.Next() && (limit == 0 || count < limit) {
 		var parentID uint64
 
 		err = parentRows.Scan(&parentID)
@@ -350,7 +349,7 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 			return posts, err
 		}
 
-		for childRows.Next() {
+		for childRows.Next() && (limit == 0 || count < limit) {
 			post := models.Post{Thread: threadID}
 
 			err = childRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
@@ -358,43 +357,46 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 				return posts, err
 			}
 
-			posts = append(posts, post)
+			if !desc {
+				if since == 0 || isSince {
+					posts = append(posts, post)
+					count++
+				}
+				if post.ID == since {
+					isSince = true
+				}
+			} else {
+				if post.ID == since {
+					break MainFor
+				}
+
+				posts = append(posts, post)
+			}
 		}
 	}
 
+	if len(posts) == 0 {
+		return []models.Post{}, err
+	}
+
 	if desc {
+		if len(posts) > int(limit) {
+			posts = posts[len(posts)-int(limit):]
+		}
+
 		for left, right := 0, len(posts)-1; left < right; left, right = left+1, right-1 {
 			posts[left], posts[right] = posts[right], posts[left]
 		}
 	}
 
-	var sincePosts []models.Post
-	var isSince bool
-
-	for _, post := range posts {
-		if since == 0 || isSince {
-			sincePosts = append(sincePosts, post)
-		}
-		if post.ID == since {
-			isSince = true
-		}
-
-		log.Printf("id: %d, isSince: %t, since: %d", post.ID, isSince, since)
-	}
-
-	if len(sincePosts) == 0 {
-		return []models.Post{}, err
-	}
-
-	if limit != 0 && len(sincePosts) > int(limit) {
-		return sincePosts[:limit], err
-	}
-
-	return sincePosts, err
+	return posts, err
 }
 
 func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
-	getParentPosts := `SELECT id FROM post WHERE thread = $1 AND parent = 0`
+	getParentPosts := `
+		SELECT id
+		FROM post
+		WHERE thread = $1 AND parent = 0`
 
 	if desc {
 		getParentPosts = getParentPosts + " ORDER BY created DESC, id DESC"
@@ -410,17 +412,17 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 
 	getChildPosts := `
 		WITH RECURSIVE children (id, author, created, forum, is_edited, message, parent, path) AS (
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, lpad(p.id::text, 5, '0')
+			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, lpad(p.id::text, 7, '0')
 			FROM post p
-			LEFT JOIN "user" u ON p.author = u.id
-			LEFT JOIN forum f ON p.forum = f.id
+			JOIN "user" u ON p.author = u.id
+			JOIN forum f ON p.forum = f.id
 			WHERE p.id = $1
 		UNION ALL
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, c.path || '.' || lpad(p.id::text, 5, '0')
+			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, c.path || '.' || lpad(p.id::text, 7, '0')
 			FROM post p
-			INNER JOIN children c ON p.parent = c.id
-			LEFT JOIN "user" u ON p.author = u.id
-			LEFT JOIN forum f ON p.forum = f.id
+			JOIN children c ON p.parent = c.id
+			JOIN "user" u ON p.author = u.id
+			JOIN forum f ON p.forum = f.id
 		)
 		SELECT id, author, created, forum, is_edited, message, parent FROM children
 		ORDER BY path`
@@ -459,8 +461,6 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 			if post.ID == since {
 				isSince = true
 			}
-
-			log.Printf("id: %d, parent: %d, isSince: %t, since: %d, author id: %d, forum id: %d", post.ID, parentID, isSince, since, post.Author, post.Forum)
 		}
 
 		if added {
