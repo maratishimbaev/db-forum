@@ -6,6 +6,7 @@ import (
 	"forum/models"
 	_user "forum/user"
 	"forum/utils"
+	"strings"
 )
 
 type repository struct {
@@ -122,30 +123,32 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	}
 
 	getUsers := `
-		SELECT * FROM (
-			SELECT u.about, u.email, u.fullname, u.nickname 
-			FROM forum f
-			JOIN post p ON f.id = p.forum
-			JOIN "user" u ON p.author = u.id
-			WHERE LOWER(f.slug) = LOWER($1)
-			UNION
-			SELECT u.about, u.email, u.fullname, u.nickname
-			FROM forum f
-			JOIN thread t ON f.id = t.forum
-			JOIN "user" u ON t.author = u.id
-			WHERE LOWER(f.slug) = LOWER($1)
-		) users`
+		SELECT u.about, u.email, u.fullname, u.nickname, LOWER(u.nickname) COLLATE "C" n
+		FROM forum f
+		JOIN post p ON f.id = p.forum
+		JOIN "user" u ON p.author = u.id
+		WHERE LOWER(f.slug) = LOWER($1) since
+		UNION
+		SELECT u.about, u.email, u.fullname, u.nickname, LOWER(u.nickname) COLLATE "C" n
+		FROM forum f
+		JOIN thread t ON f.id = t.forum
+		JOIN "user" u ON t.author = u.id
+		WHERE LOWER(f.slug) = LOWER($1) since`
 
 	if !desc {
 		if since != "" {
-			getUsers += ` WHERE LOWER(users.nickname) > LOWER(?) COLLATE "C"`
+			getUsers = strings.Replace(getUsers, "since", `AND LOWER(u.nickname) > LOWER(?) COLLATE "C"`, 2)
+		} else {
+			getUsers = strings.Replace(getUsers, "since", "", 2)
 		}
-		getUsers += ` ORDER BY LOWER(users.nickname) COLLATE "C"`
+		getUsers += ` ORDER BY n`
 	} else {
 		if since != "" {
-			getUsers += ` WHERE LOWER(users.nickname) < LOWER(?) COLLATE "C"`
+			getUsers = strings.Replace(getUsers, "since", `AND LOWER(u.nickname) < LOWER(?) COLLATE "C"`, 2)
+		} else {
+			getUsers = strings.Replace(getUsers, "since", "", 2)
 		}
-		getUsers += ` ORDER BY LOWER(users.nickname) COLLATE "C" DESC`
+		getUsers += ` ORDER BY n DESC`
 	}
 
 	if limit != 0 {
@@ -154,15 +157,15 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 
 	getUsers = utils.ReplaceSQL(getUsers, "?", 2)
 
-	fmt.Println(getUsers)
+	fmt.Printf("%s\n", getUsers)
 
 	var rows *sql.Rows
 	switch true {
 	case since != "" && limit != 0:
-		rows, err = r.db.Query(getUsers, forumSlug, since, limit)
+		rows, err = r.db.Query(getUsers, forumSlug, since, since, limit)
 		break
 	case since != "":
-		rows, err = r.db.Query(getUsers, forumSlug, since)
+		rows, err = r.db.Query(getUsers, forumSlug, since, since)
 		break
 	case limit != 0:
 		rows, err = r.db.Query(getUsers, forumSlug, limit)
@@ -175,18 +178,16 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	}
 	defer rows.Close()
 
-	var userCount uint64
-
-	for rows.Next() && (limit == 0 || userCount < limit) {
+	for rows.Next() {
 		var user models.User
 
-		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
+		var temp string
+		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname, &temp)
 		if err != nil {
 			return users, fmt.Errorf("error: %w, forum slug: %s", _user.ErrForumNotFound, forumSlug)
 		}
 
 		users = append(users, user)
-		userCount++
 	}
 
 	if len(users) == 0 {

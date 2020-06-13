@@ -81,14 +81,14 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 		postFull.Thread = &models.Thread{}
 
 		getThread := `
-			SELECT t.id, u.nickname, t.created, f.slug, t.message, t.slug, t.title
+			SELECT t.id, u.nickname, t.created, f.slug, t.message, t.slug, t.title, t.votes
 			FROM thread t
 			JOIN "user" u ON t.author = u.id
 			JOIN forum f ON t.forum = f.id
 			WHERE t.id = $1`
 		if err = r.db.QueryRow(getThread, postFull.Post.Thread).
 			Scan(&postFull.Thread.ID, &postFull.Thread.Author, &postFull.Thread.Created, &postFull.Thread.Forum,
-				&postFull.Thread.Message, &postFull.Thread.Slug, &postFull.Thread.Title); err != nil {
+				&postFull.Thread.Message, &postFull.Thread.Slug, &postFull.Thread.Title, &postFull.Thread.Votes); err != nil {
 			return postFull, err
 		}
 	}
@@ -261,24 +261,46 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 		JOIN forum f ON p.forum = f.id
 		WHERE p.thread = $1`
 
-	if desc {
-		getPosts = getPosts + " ORDER BY created DESC, id DESC"
+	if !desc {
+		if since != 0 {
+			getPosts += ` AND p.id > ?`
+		}
+		getPosts += ` ORDER BY created, id`
 	} else {
-		getPosts = getPosts + " ORDER BY created, id"
+		if since != 0 {
+			getPosts += ` AND p.id < ?`
+		}
+		getPosts += ` ORDER BY created DESC, id DESC`
 	}
+
+	if limit != 0 {
+		getPosts += ` LIMIT ?`
+	}
+
+	getPosts = utils.ReplaceSQL(getPosts, "?", 2)
 
 	var parentRows *sql.Rows
 
-	parentRows, err = r.db.Query(getPosts, threadID)
+	switch true {
+	case since != 0 && limit != 0:
+		parentRows, err = r.db.Query(getPosts, threadID, since, limit)
+		break
+	case since != 0:
+		parentRows, err = r.db.Query(getPosts, threadID, since)
+		break
+	case limit != 0:
+		parentRows, err = r.db.Query(getPosts, threadID, limit)
+		break
+	default:
+		parentRows, err = r.db.Query(getPosts, threadID)
+	}
+
 	if err != nil {
 		return posts, err
 	}
 	defer parentRows.Close()
 
-	var postCount uint64
-	var isSince bool
-
-	for parentRows.Next() && (limit == 0 || postCount < limit) {
+	for parentRows.Next() {
 		post := models.Post{Thread: threadID}
 
 		err = parentRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
@@ -286,13 +308,7 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 			return posts, err
 		}
 
-		if since == 0 || isSince {
-			posts = append(posts, post)
-			postCount++
-		}
-		if post.ID == since {
-			isSince = true
-		}
+		posts = append(posts, post)
 	}
 
 	if len(posts) == 0 {
@@ -303,13 +319,31 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 }
 
 func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
+	var startsWith uint64
+
+	if since != 0 && !desc {
+		getParents := `
+		WITH RECURSIVE parent (id, parent) AS (
+			SELECT id, parent
+			FROM post
+			WHERE id = $1
+		UNION ALL
+			SELECT post.id, post.parent
+			FROM post
+			JOIN parent ON post.id = parent.parent
+		)
+		SELECT id FROM parent
+		WHERE parent = 0`
+		err = r.db.QueryRow(getParents, since).Scan(&startsWith)
+	}
+
 	getParentPosts := `
 		SELECT id
 		FROM post
-		WHERE thread = $1 AND parent = 0
+		WHERE thread = $1 AND parent = 0 AND id >= $2
 		ORDER BY created, id`
 
-	parentRows, err := r.db.Query(getParentPosts, threadID)
+	parentRows, err := r.db.Query(getParentPosts, threadID, startsWith)
 	if err != nil {
 		return posts, err
 	}
@@ -393,18 +427,49 @@ MainFor:
 }
 
 func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
+	var startsWith uint64
+
+	if since != 0 {
+		getParents := `
+		WITH RECURSIVE parent (id, parent) AS (
+			SELECT id, parent
+			FROM post
+			WHERE id = $1
+		UNION ALL
+			SELECT post.id, post.parent
+			FROM post
+			JOIN parent ON post.id = parent.parent
+		)
+		SELECT id FROM parent
+		WHERE parent = 0`
+		err = r.db.QueryRow(getParents, since).Scan(&startsWith)
+	}
+
 	getParentPosts := `
 		SELECT id
 		FROM post
 		WHERE thread = $1 AND parent = 0`
 
 	if desc {
-		getParentPosts = getParentPosts + " ORDER BY created DESC, id DESC"
+		if since != 0 {
+			getParentPosts += ` AND id < $3`
+		}
+		getParentPosts += ` ORDER BY created DESC, id DESC`
 	} else {
-		getParentPosts = getParentPosts + " ORDER BY created, id"
+		if since != 0 {
+			getParentPosts += ` AND id > $3`
+		}
+		getParentPosts += ` ORDER BY created, id`
 	}
 
-	parentRows, err := r.db.Query(getParentPosts, threadID)
+	getParentPosts += ` LIMIT $2`
+
+	var parentRows *sql.Rows
+	if since != 0 {
+		parentRows, err = r.db.Query(getParentPosts, threadID, limit, startsWith)
+	} else {
+		parentRows, err = r.db.Query(getParentPosts, threadID, limit)
+	}
 	if err != nil {
 		return posts, err
 	}
@@ -427,11 +492,7 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 		SELECT id, author, created, forum, is_edited, message, parent FROM children
 		ORDER BY path`
 
-	var parentCount uint64
-	var isSince bool
-	var added bool
-
-	for parentRows.Next() && (limit == 0 || parentCount < limit) {
+	for parentRows.Next() {
 		var parentID uint64
 
 		err = parentRows.Scan(&parentID)
@@ -444,8 +505,6 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 			return posts, err
 		}
 
-		added = false
-
 		for childRows.Next() {
 			post := models.Post{Thread: threadID}
 
@@ -454,17 +513,7 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 				return posts, err
 			}
 
-			if since == 0 || isSince {
-				posts = append(posts, post)
-				added = true
-			}
-			if post.ID == since {
-				isSince = true
-			}
-		}
-
-		if added {
-			parentCount++
+			posts = append(posts, post)
 		}
 	}
 
