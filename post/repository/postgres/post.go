@@ -265,12 +265,12 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 		if since != 0 {
 			getPosts += ` AND p.id > ?`
 		}
-		getPosts += ` ORDER BY created, id`
+		getPosts += ` ORDER BY id`
 	} else {
 		if since != 0 {
 			getPosts += ` AND p.id < ?`
 		}
-		getPosts += ` ORDER BY created DESC, id DESC`
+		getPosts += ` ORDER BY id DESC`
 	}
 
 	if limit != 0 {
@@ -319,202 +319,187 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 }
 
 func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
-	var startsWith uint64
-
-	if since != 0 && !desc {
-		getParents := `
-		WITH RECURSIVE parent (id, parent) AS (
-			SELECT id, parent
-			FROM post
-			WHERE id = $1
-		UNION ALL
-			SELECT post.id, post.parent
-			FROM post
-			JOIN parent ON post.id = parent.parent
-		)
-		SELECT id FROM parent
-		WHERE parent = 0`
-		err = r.db.QueryRow(getParents, since).Scan(&startsWith)
+	var tree, leftKey uint64
+	if since != 0 {
+		err = r.db.QueryRow(`SELECT tree, left_key FROM post WHERE id = $1`, since).Scan(&tree, &leftKey)
+		if err != nil {
+			return posts, err
+		}
 	}
 
-	getParentPosts := `
-		SELECT id
-		FROM post
-		WHERE thread = $1 AND parent = 0 AND id >= $2
-		ORDER BY created, id`
+	getPosts := `
+		SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent
+		FROM post p
+		JOIN "user" u ON p.author = u.id
+		JOIN forum f ON p.forum = f.id
+		WHERE p.thread = $1`
 
-	parentRows, err := r.db.Query(getParentPosts, threadID, startsWith)
+	if !desc {
+		if since != 0 {
+			getPosts += ` AND ((p.tree = $2 AND p.left_key > $3) OR (p.tree > $2))`
+		}
+		getPosts += ` ORDER BY p.tree, p.left_key`
+	} else {
+		if since != 0 {
+			getPosts += ` AND ((p.tree = $2 AND p.left_key < $3) OR (p.tree < $2))`
+		}
+		getPosts += ` ORDER BY p.tree DESC, p.left_key DESC`
+	}
+
+	if limit != 0 {
+		getPosts += ` LIMIT ?`
+	}
+
+	var startsWith uint64 = 2
+	if since != 0 {
+		startsWith = 4
+	}
+	getPosts = utils.ReplaceSQL(getPosts, "?", startsWith)
+
+	var rows *sql.Rows
+	switch true {
+	case since != 0 && limit != 0:
+		rows, err = r.db.Query(getPosts, threadID, tree, leftKey, limit)
+		break
+	case since != 0:
+		rows, err = r.db.Query(getPosts, threadID, tree, leftKey)
+		break
+	case limit != 0:
+		rows, err = r.db.Query(getPosts, threadID, limit)
+		break
+	default:
+		rows, err = r.db.Query(getPosts, threadID)
+	}
 	if err != nil {
 		return posts, err
 	}
-	defer parentRows.Close()
+	defer rows.Close()
 
-	getChildPosts := `
-		WITH RECURSIVE children (id, author, created, forum, is_edited, message, parent, path) AS (
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, lpad(p.id::text, 7, '0')
-			FROM post p
-			JOIN "user" u ON p.author = u.id
-			JOIN forum f ON p.forum = f.id
-			WHERE p.id = $1
-		UNION ALL
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, c.path || '.' || lpad(p.id::text, 7, '0')
-			FROM post p
-			JOIN children c ON p.parent = c.id
-			JOIN "user" u ON p.author = u.id
-			JOIN forum f ON p.forum = f.id
-		)
-		SELECT id, author, created, forum, is_edited, message, parent FROM children
-		ORDER BY path`
+	for rows.Next() {
+		post := models.Post{Thread: threadID}
 
-	var isSince bool
-	var count uint64
-
-MainFor:
-	for parentRows.Next() && (limit == 0 || count < limit) {
-		var parentID uint64
-
-		err = parentRows.Scan(&parentID)
+		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
 		if err != nil {
 			return posts, err
 		}
 
-		childRows, err := r.db.Query(getChildPosts, parentID)
-		if err != nil {
-			return posts, err
-		}
-
-		for childRows.Next() && (limit == 0 || count < limit) {
-			post := models.Post{Thread: threadID}
-
-			err = childRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
-			if err != nil {
-				return posts, err
-			}
-
-			if !desc {
-				if since == 0 || isSince {
-					posts = append(posts, post)
-					count++
-				}
-				if post.ID == since {
-					isSince = true
-				}
-			} else {
-				if post.ID == since {
-					break MainFor
-				}
-
-				posts = append(posts, post)
-			}
-		}
+		posts = append(posts, post)
 	}
 
 	if len(posts) == 0 {
 		return []models.Post{}, err
 	}
 
-	if desc {
-		if len(posts) > int(limit) {
-			posts = posts[len(posts)-int(limit):]
-		}
-
-		for left, right := 0, len(posts)-1; left < right; left, right = left+1, right-1 {
-			posts[left], posts[right] = posts[right], posts[left]
-		}
-	}
-
 	return posts, err
 }
 
 func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
-	var startsWith uint64
-
+	var tree uint64
 	if since != 0 {
-		getParents := `
-		WITH RECURSIVE parent (id, parent) AS (
-			SELECT id, parent
-			FROM post
-			WHERE id = $1
-		UNION ALL
-			SELECT post.id, post.parent
-			FROM post
-			JOIN parent ON post.id = parent.parent
-		)
-		SELECT id FROM parent
-		WHERE parent = 0`
-		err = r.db.QueryRow(getParents, since).Scan(&startsWith)
+		err = r.db.QueryRow(`SELECT tree FROM post WHERE id = $1`, since).Scan(&tree)
+		if err != nil {
+			return posts, err
+		}
 	}
 
-	getParentPosts := `
-		SELECT id
+	getTrees := `
+		SELECT tree
 		FROM post
 		WHERE thread = $1 AND parent = 0`
 
-	if desc {
-		if since != 0 {
-			getParentPosts += ` AND id < $3`
+	if since != 0 {
+		if !desc {
+			getTrees += `
+				AND tree > $2
+				ORDER BY tree`
+		} else {
+			getTrees += `
+				AND tree < $2
+				ORDER BY tree DESC`
 		}
-		getParentPosts += ` ORDER BY created DESC, id DESC`
+		getTrees += ` LIMIT $3`
 	} else {
-		if since != 0 {
-			getParentPosts += ` AND id > $3`
+		if !desc {
+			getTrees += `
+				ORDER BY tree
+				LIMIT $2`
+		} else {
+			getTrees += `
+				ORDER BY tree DESC
+				LIMIT $2`
 		}
-		getParentPosts += ` ORDER BY created, id`
 	}
 
-	getParentPosts += ` LIMIT $2`
-
-	var parentRows *sql.Rows
+	var idRows *sql.Rows
 	if since != 0 {
-		parentRows, err = r.db.Query(getParentPosts, threadID, limit, startsWith)
+		if limit != 0 {
+			idRows, err = r.db.Query(getTrees, threadID, tree, limit)
+		} else {
+			idRows, err = r.db.Query(getTrees, threadID, tree)
+		}
 	} else {
-		parentRows, err = r.db.Query(getParentPosts, threadID, limit)
+		if limit != 0 {
+			idRows, err = r.db.Query(getTrees, threadID, limit)
+		} else {
+			idRows, err = r.db.Query(getTrees, threadID)
+		}
 	}
 	if err != nil {
 		return posts, err
 	}
-	defer parentRows.Close()
+	defer idRows.Close()
 
-	getChildPosts := `
-		WITH RECURSIVE children (id, author, created, forum, is_edited, message, parent, path) AS (
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, lpad(p.id::text, 7, '0')
-			FROM post p
-			JOIN "user" u ON p.author = u.id
-			JOIN forum f ON p.forum = f.id
-			WHERE p.id = $1
-		UNION ALL
-			SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent, c.path || '.' || lpad(p.id::text, 7, '0')
-			FROM post p
-			JOIN children c ON p.parent = c.id
-			JOIN "user" u ON p.author = u.id
-			JOIN forum f ON p.forum = f.id
-		)
-		SELECT id, author, created, forum, is_edited, message, parent FROM children
-		ORDER BY path`
+	var ids []uint64
+	var firstTree, secondTree uint64
 
-	for parentRows.Next() {
-		var parentID uint64
+	for idRows.Next() {
+		var id uint64
 
-		err = parentRows.Scan(&parentID)
+		err = idRows.Scan(&id)
 		if err != nil {
 			return posts, err
 		}
 
-		childRows, err := r.db.Query(getChildPosts, parentID)
+		ids = append(ids, id)
+	}
+
+	if len(ids) > 0 {
+		firstTree = ids[0]
+		secondTree = ids[len(ids)-1]
+	}
+
+	if firstTree > secondTree {
+		firstTree, secondTree = secondTree, firstTree
+	}
+
+	getPosts := `
+		SELECT p.id, u.nickname, p.created, f.slug, p.is_edited, p.message, p.parent
+		FROM post p
+		JOIN "user" u ON p.author = u.id
+		JOIN forum f ON p.forum = f.id
+		WHERE p.thread = $1 AND p.tree >= $2 AND p.tree <= $3`
+
+	if !desc {
+		getPosts += ` ORDER BY tree, left_key`
+	} else {
+		getPosts += ` ORDER BY p.tree DESC, p.left_key`
+	}
+
+	rows, err := r.db.Query(getPosts, threadID, firstTree, secondTree)
+	if err != nil {
+		return posts, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		post := models.Post{Thread: threadID}
+
+		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
 		if err != nil {
 			return posts, err
 		}
 
-		for childRows.Next() {
-			post := models.Post{Thread: threadID}
-
-			err = childRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
-			if err != nil {
-				return posts, err
-			}
-
-			posts = append(posts, post)
-		}
+		posts = append(posts, post)
 	}
 
 	if len(posts) == 0 {

@@ -16,6 +16,62 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: ltree; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS ltree WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION ltree; Type: COMMENT; Schema: -; Owner:
+--
+
+COMMENT ON EXTENSION ltree IS 'data type for hierarchical tree-like structures';
+
+
+--
+-- Name: post_before_insert_func(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.post_before_insert_func() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+declare
+    _left_key integer;
+    _right_key integer;
+    _tree integer;
+begin
+    if new.parent = 0 then
+        new.left_key := 1;
+        new.right_key := 2;
+        new.tree := nextval('tree');
+    else
+        select left_key, right_key, tree
+        into _left_key, _right_key, _tree
+        from post
+        where id = new.parent;
+
+        update post
+        set left_key = left_key + 2
+        where left_key > _right_key and tree = _tree;
+
+        update post
+        set right_key = right_key + 2
+        where right_key >= _right_key and tree = _tree;
+
+        new.left_key := _right_key;
+        new.right_key := _right_key + 1;
+        new.tree := _tree;
+    end if;
+
+    return new;
+end
+$$;
+
+
+ALTER FUNCTION public.post_before_insert_func() OWNER TO postgres;
+
+--
 -- Name: posts_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -137,8 +193,11 @@ CREATE TABLE public.post (
                              forum integer,
                              is_edited boolean NOT NULL,
                              message text NOT NULL,
+                             thread integer,
                              parent integer,
-                             thread integer
+                             left_key integer NOT NULL,
+                             right_key integer NOT NULL,
+                             tree integer NOT NULL
 );
 
 
@@ -205,6 +264,20 @@ ALTER TABLE public.thread_id_seq OWNER TO postgres;
 
 ALTER SEQUENCE public.thread_id_seq OWNED BY public.thread.id;
 
+
+--
+-- Name: tree; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.tree
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.tree OWNER TO postgres;
 
 --
 -- Name: user; Type: TABLE; Schema: public; Owner: postgres
@@ -339,6 +412,27 @@ CREATE INDEX index_vote_thread_user ON public.vote USING btree (thread, "user");
 
 
 --
+-- Name: post_left_key_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX post_left_key_idx ON public.post USING btree (left_key);
+
+
+--
+-- Name: post_right_key_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX post_right_key_idx ON public.post USING btree (right_key);
+
+
+--
+-- Name: post_tree_left_key_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX post_tree_left_key_idx ON public.post USING btree (tree, left_key);
+
+
+--
 -- Name: thread_lower_slug_key; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -364,6 +458,13 @@ CREATE UNIQUE INDEX user_lower_nickname_key ON public."user" USING btree (lower(
 --
 
 CREATE UNIQUE INDEX vote_user_and_thread_key ON public.vote USING btree ("user", thread);
+
+
+--
+-- Name: post post_before_insert; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER post_before_insert BEFORE INSERT ON public.post FOR EACH ROW EXECUTE PROCEDURE public.post_before_insert_func();
 
 
 --

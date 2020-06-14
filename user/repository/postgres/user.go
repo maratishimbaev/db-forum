@@ -157,8 +157,6 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 
 	getUsers = utils.ReplaceSQL(getUsers, "?", 2)
 
-	fmt.Printf("%s\n", getUsers)
-
 	var rows *sql.Rows
 	switch true {
 	case since != "" && limit != 0:
