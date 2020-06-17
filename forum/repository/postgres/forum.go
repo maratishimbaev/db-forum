@@ -15,16 +15,16 @@ func NewForumRepository(db *sql.DB) *repository {
 }
 
 func (r *repository) CreateForum(newForum *models.Forum) (forum models.Forum, err error) {
-	var userID uint64
-	getUserID := `SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-	if err := r.db.QueryRow(getUserID, newForum.User).Scan(&userID); err != nil {
+	var userNickname string
+	getUserNickname := `SELECT nickname FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+	if err := r.db.QueryRow(getUserNickname, newForum.User).Scan(&userNickname); err != nil {
 		return forum, _forum.ErrUserNotFound
 	}
 
 	createForum := `
 		INSERT INTO forum (slug, title, "user")
 		VALUES ($1, $2, $3)`
-	_, err = r.db.Exec(createForum, newForum.Slug, newForum.Title, userID)
+	_, err = r.db.Exec(createForum, newForum.Slug, newForum.Title, userNickname)
 
 	if err != nil {
 		var hasUser bool
@@ -56,10 +56,10 @@ func (r *repository) CreateForum(newForum *models.Forum) (forum models.Forum, er
 }
 
 func (r *repository) GetForum(slug string) (forum models.Forum, err error) {
-	getForum := `SELECT f.title, u.nickname, f.slug, f.posts, f.threads
-				 FROM forum f
-				 JOIN "user" u ON f.user = u.id
-				 WHERE LOWER(f.slug) = LOWER($1)`
+	getForum := `
+		SELECT title, "user", slug, posts, threads
+		FROM forum f
+		WHERE LOWER(f.slug) = LOWER($1)`
 	err = r.db.QueryRow(getForum, slug).Scan(&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
 	if err != nil {
 		return forum, _forum.ErrNotFound

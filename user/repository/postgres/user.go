@@ -123,32 +123,28 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	}
 
 	getUsers := `
-		SELECT u.about, u.email, u.fullname, u.nickname, LOWER(u.nickname) COLLATE "C" n
-		FROM forum f
-		JOIN post p ON f.id = p.forum
-		JOIN "user" u ON p.author = u.id
-		WHERE LOWER(f.slug) = LOWER($1) since
-		UNION
-		SELECT u.about, u.email, u.fullname, u.nickname, LOWER(u.nickname) COLLATE "C" n
-		FROM forum f
-		JOIN thread t ON f.id = t.forum
-		JOIN "user" u ON t.author = u.id
-		WHERE LOWER(f.slug) = LOWER($1) since`
+		SELECT about, email, fullname, nickname
+		FROM "user"
+		WHERE nickname IN (
+			SELECT "user"
+			FROM forum_user
+			WHERE LOWER(forum) = LOWER($1) since
+		)`
 
 	if !desc {
 		if since != "" {
-			getUsers = strings.Replace(getUsers, "since", `AND LOWER(u.nickname) > LOWER(?) COLLATE "C"`, 2)
+			getUsers = strings.Replace(getUsers, "since", `AND LOWER("user") > LOWER(?) COLLATE "C"`, 1)
 		} else {
-			getUsers = strings.Replace(getUsers, "since", "", 2)
+			getUsers = strings.Replace(getUsers, "since", "", 1)
 		}
-		getUsers += ` ORDER BY n`
+		getUsers += ` ORDER BY LOWER(nickname) COLLATE "C"`
 	} else {
 		if since != "" {
-			getUsers = strings.Replace(getUsers, "since", `AND LOWER(u.nickname) < LOWER(?) COLLATE "C"`, 2)
+			getUsers = strings.Replace(getUsers, "since", `AND LOWER("user") < LOWER(?) COLLATE "C"`, 1)
 		} else {
-			getUsers = strings.Replace(getUsers, "since", "", 2)
+			getUsers = strings.Replace(getUsers, "since", "", 1)
 		}
-		getUsers += ` ORDER BY n DESC`
+		getUsers += ` ORDER BY LOWER(nickname) COLLATE "C" DESC`
 	}
 
 	if limit != 0 {
@@ -160,10 +156,10 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	var rows *sql.Rows
 	switch true {
 	case since != "" && limit != 0:
-		rows, err = r.db.Query(getUsers, forumSlug, since, since, limit)
+		rows, err = r.db.Query(getUsers, forumSlug, since, limit)
 		break
 	case since != "":
-		rows, err = r.db.Query(getUsers, forumSlug, since, since)
+		rows, err = r.db.Query(getUsers, forumSlug, since)
 		break
 	case limit != 0:
 		rows, err = r.db.Query(getUsers, forumSlug, limit)
@@ -179,9 +175,9 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	for rows.Next() {
 		var user models.User
 
-		var temp string
-		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname, &temp)
+		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 		if err != nil {
+			fmt.Println(err.Error())
 			return users, fmt.Errorf("error: %w, forum slug: %s", _user.ErrForumNotFound, forumSlug)
 		}
 

@@ -41,6 +41,13 @@ func (r *Repository) ClearDB() (err error) {
 		return err
 	}
 
+	clearForumUser := `DELETE FROM forum_user`
+	_, err = r.DB.Exec(clearForumUser)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
 	clearForum := `DELETE FROM forum`
 	_, err = r.DB.Exec(clearForum)
 	if err != nil {

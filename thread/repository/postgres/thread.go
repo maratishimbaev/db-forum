@@ -17,16 +17,16 @@ func NewThreadRepository(db *sql.DB) *repository {
 }
 
 func (r *repository) CreateThread(newThread *models.Thread) (thread models.Thread, err error) {
-	var authorID uint64
-	getAuthorID := `SELECT id FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-	err = r.db.QueryRow(getAuthorID, newThread.Author).Scan(&authorID)
+	var authorNickname string
+	getAuthorNickname := `SELECT nickname FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+	err = r.db.QueryRow(getAuthorNickname, newThread.Author).Scan(&authorNickname)
 	if err != nil {
 		return thread, _thread.UserOrForumNotFound
 	}
 
-	var forumID uint64
-	getForumID := `SELECT id FROM forum WHERE LOWER(slug) = LOWER($1)`
-	err = r.db.QueryRow(getForumID, newThread.Forum).Scan(&forumID)
+	var forumSlug string
+	getForumSlug := `SELECT slug FROM forum WHERE LOWER(slug) = LOWER($1)`
+	err = r.db.QueryRow(getForumSlug, newThread.Forum).Scan(&forumSlug)
 	if err != nil {
 		return thread, _thread.UserOrForumNotFound
 	}
@@ -34,7 +34,7 @@ func (r *repository) CreateThread(newThread *models.Thread) (thread models.Threa
 	createThread := `
 		INSERT INTO thread (author, created, forum, message, slug, title)
 		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
-	err = r.db.QueryRow(createThread, authorID, newThread.Created, forumID, newThread.Message, newThread.Slug, newThread.Title).
+	err = r.db.QueryRow(createThread, authorNickname, newThread.Created, forumSlug, newThread.Message, newThread.Slug, newThread.Title).
 		Scan(&newThread.ID)
 
 	if err != nil {
@@ -55,9 +55,10 @@ func (r *repository) CreateThread(newThread *models.Thread) (thread models.Threa
 }
 
 func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc bool) (threads []models.Thread, err error) {
-	var forumID uint64
-	getForumID := `SELECT id FROM forum WHERE LOWER(slug) = LOWER($1)`
-	if err := r.db.QueryRow(getForumID, slug).Scan(&forumID); err != nil {
+	var forumExists bool
+	checkForum := `SELECT EXISTS(SELECT 1 FROM forum WHERE LOWER(slug) = LOWER($1))`
+	err = r.db.QueryRow(checkForum, slug).Scan(&forumExists)
+	if err != nil || !forumExists {
 		return threads, _thread.UserOrForumNotFound
 	}
 
@@ -65,11 +66,9 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 
 	if desc {
 		getThreads = `
-			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
+			SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
 			FROM thread t
-			JOIN "user" u ON t.author = u.id
-			JOIN forum f ON t.forum = f.id
-			WHERE t.forum = $1 AND t.created <= $2
+			WHERE LOWER(t.forum) = LOWER($1) AND t.created <= $2
 			ORDER BY t.created DESC`
 
 		if since == (time.Time{}) {
@@ -77,11 +76,9 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 		}
 	} else {
 		getThreads = `
-			SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
+			SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
 			FROM thread t
-			JOIN "user" u ON t.author = u.id
-			JOIN forum f ON t.forum = f.id
-			WHERE t.forum = $1 AND t.created >= $2
+			WHERE LOWER(t.forum) = LOWER($1) AND t.created >= $2
 			ORDER BY t.created`
 
 		if since == (time.Time{}) {
@@ -92,11 +89,11 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 	var rows *sql.Rows
 
 	if limit == 0 {
-		rows, err = r.db.Query(getThreads, forumID, since)
+		rows, err = r.db.Query(getThreads, slug, since)
 	} else {
 		getThreads = getThreads + " LIMIT $3"
 
-		rows, err = r.db.Query(getThreads, forumID, since, limit)
+		rows, err = r.db.Query(getThreads, slug, since, limit)
 	}
 	if err != nil {
 		return threads, err
@@ -123,10 +120,8 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 
 func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
+		SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
 		FROM thread t
-		JOIN "user" u ON t.author = u.id
-		JOIN forum f ON t.forum = f.id
 		WHERE t.id = $1`
 	if err = r.db.QueryRow(getThread, id).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
@@ -139,10 +134,8 @@ func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) 
 
 func (r *repository) GetThreadBySlug(slug string) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
+		SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
 		FROM thread t
-		JOIN "user" u ON t.author = u.id
-		JOIN forum f ON t.forum = f.id
 		WHERE LOWER(t.slug) = LOWER($1)`
 	if err = r.db.QueryRow(getThread, slug).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
@@ -174,7 +167,7 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 	var threadID uint64
 
 	var isThreadID bool
-	checkThreadID := `SELECT COUNT(*) <> 0 FROM thread WHERE id = $1`
+	checkThreadID := `SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)`
 	err = r.db.QueryRow(checkThreadID, slugOrID).Scan(&isThreadID)
 
 	if isThreadID {
@@ -212,10 +205,8 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (th
 	}
 
 	getThread := `
-		SELECT t.id, u.nickname, t.created, f.slug, t.message, t.slug, t.title
+		SELECT t.id, t.author, t.created, t.forum, t.message, t.slug, t.title
 		FROM thread t
-		JOIN "user" u ON t.author = u.id
-		JOIN forum f ON t.forum = f.id
 		WHERE t.id = $1`
 	err = r.db.QueryRow(getThread, threadID).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Forum, &thread.Message, &thread.Slug, &thread.Title)
@@ -258,10 +249,8 @@ func (r *repository) VoteThread(slugOrID string, vote models.Vote) (thread model
 	}
 
 	getThread := `
-		SELECT t.id, u.nickname, t.created, t.message, t.slug, t.title, f.slug, t.votes
+		SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
 		FROM thread t
-		JOIN "user" u ON t.author = u.id
-		JOIN forum f ON t.forum = f.id
 		WHERE t.id = $1`
 	if err = r.db.QueryRow(getThread, threadID).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,

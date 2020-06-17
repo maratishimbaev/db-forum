@@ -72,6 +72,25 @@ $$;
 ALTER FUNCTION public.post_before_insert_func() OWNER TO postgres;
 
 --
+-- Name: post_user_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.post_user_add_func() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+begin
+    insert into forum_user (forum, "user")
+    values (new.forum, new.author)
+    on conflict do nothing;
+
+    return new;
+end
+$$;
+
+
+ALTER FUNCTION public.post_user_add_func() OWNER TO postgres;
+
+--
 -- Name: posts_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -80,10 +99,10 @@ CREATE FUNCTION public.posts_add_func() RETURNS trigger
 AS $$
 begin
     if (tg_op = 'INSERT') then
-        update forum set posts = posts + 1 where id = new.forum;
+        update forum set posts = posts + 1 where slug = new.forum;
         return new;
     elsif (tg_op = 'DELETE') then
-        update forum set posts = posts - 1 where id = old.forum;
+        update forum set posts = posts - 1 where slug = old.forum;
         return old;
     end if;
     return null;
@@ -94,6 +113,25 @@ $$;
 ALTER FUNCTION public.posts_add_func() OWNER TO postgres;
 
 --
+-- Name: thread_user_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.thread_user_add_func() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+begin
+    insert into forum_user (forum, "user")
+    values (new.forum, new.author)
+    on conflict do nothing;
+
+    return new;
+end
+$$;
+
+
+ALTER FUNCTION public.thread_user_add_func() OWNER TO postgres;
+
+--
 -- Name: threads_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -102,10 +140,10 @@ CREATE FUNCTION public.threads_add_func() RETURNS trigger
 AS $$
 begin
     if (tg_op = 'INSERT') then
-        update forum set threads = threads + 1 where id = new.forum;
+        update forum set threads = threads + 1 where slug = new.forum;
         return new;
     elsif (tg_op = 'DELETE') then
-        update forum set threads = threads - 1 where id = old.forum;
+        update forum set threads = threads - 1 where slug = old.forum;
         return old;
     end if;
     return null;
@@ -152,9 +190,9 @@ CREATE TABLE public.forum (
                               id integer NOT NULL,
                               slug character varying(256) NOT NULL,
                               title character varying(256) NOT NULL,
-                              "user" integer NOT NULL,
                               posts integer DEFAULT 0,
-                              threads integer DEFAULT 0
+                              threads integer DEFAULT 0,
+                              "user" character varying(64) NOT NULL
 );
 
 
@@ -183,21 +221,33 @@ ALTER SEQUENCE public.forum_id_seq OWNED BY public.forum.id;
 
 
 --
+-- Name: forum_user; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.forum_user (
+                                   forum character varying(256) NOT NULL,
+                                   "user" character varying(64) NOT NULL
+);
+
+
+ALTER TABLE public.forum_user OWNER TO postgres;
+
+--
 -- Name: post; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.post (
                              id integer NOT NULL,
-                             author integer NOT NULL,
                              created timestamp with time zone,
-                             forum integer,
                              is_edited boolean NOT NULL,
                              message text NOT NULL,
                              thread integer,
                              parent integer,
                              left_key integer NOT NULL,
                              right_key integer NOT NULL,
-                             tree integer NOT NULL
+                             tree integer NOT NULL,
+                             forum character varying(256) NOT NULL,
+                             author character varying(64) NOT NULL
 );
 
 
@@ -231,13 +281,13 @@ ALTER SEQUENCE public.post_id_seq OWNED BY public.post.id;
 
 CREATE TABLE public.thread (
                                id integer NOT NULL,
-                               author integer NOT NULL,
                                created timestamp with time zone,
-                               forum integer,
                                message text NOT NULL,
                                slug character varying(256),
                                title character varying(128) NOT NULL,
-                               votes integer DEFAULT 0
+                               votes integer DEFAULT 0,
+                               author character varying(64) NOT NULL,
+                               forum character varying(256) NOT NULL
 );
 
 
@@ -366,11 +416,35 @@ ALTER TABLE ONLY public.forum
 
 
 --
+-- Name: forum_user forum_user_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.forum_user
+    ADD CONSTRAINT forum_user_unique UNIQUE (forum, "user");
+
+
+--
+-- Name: user nickname_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public."user"
+    ADD CONSTRAINT nickname_unique UNIQUE (nickname);
+
+
+--
 -- Name: post post_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.post
     ADD CONSTRAINT post_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: forum slug_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.forum
+    ADD CONSTRAINT slug_unique UNIQUE (slug);
 
 
 --
@@ -402,6 +476,13 @@ ALTER TABLE ONLY public."user"
 --
 
 CREATE UNIQUE INDEX forum_lower_slug_key ON public.forum USING btree (lower((slug)::text));
+
+
+--
+-- Name: forum_user_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX forum_user_idx ON public.forum_user USING btree (forum, "user");
 
 
 --
@@ -447,6 +528,13 @@ CREATE UNIQUE INDEX user_lower_email_key ON public."user" USING btree (lower((em
 
 
 --
+-- Name: user_lower_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX user_lower_idx ON public."user" USING btree (lower((nickname)::text) COLLATE "C");
+
+
+--
 -- Name: user_lower_nickname_key; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -468,10 +556,24 @@ CREATE TRIGGER post_before_insert BEFORE INSERT ON public.post FOR EACH ROW EXEC
 
 
 --
+-- Name: post post_user_add; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER post_user_add AFTER INSERT ON public.post FOR EACH ROW EXECUTE PROCEDURE public.post_user_add_func();
+
+
+--
 -- Name: post posts_add; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
 CREATE TRIGGER posts_add AFTER INSERT OR UPDATE ON public.post FOR EACH ROW EXECUTE PROCEDURE public.posts_add_func();
+
+
+--
+-- Name: thread thread_user_add; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER thread_user_add AFTER INSERT ON public.thread FOR EACH ROW EXECUTE PROCEDURE public.thread_user_add_func();
 
 
 --
@@ -489,27 +591,43 @@ CREATE TRIGGER votes_add AFTER INSERT OR UPDATE ON public.vote FOR EACH ROW EXEC
 
 
 --
--- Name: forum forum_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+-- Name: thread author_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.forum
-    ADD CONSTRAINT forum_user_fkey FOREIGN KEY ("user") REFERENCES public."user"(id);
-
-
---
--- Name: post post_author_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.post
-    ADD CONSTRAINT post_author_fkey FOREIGN KEY (author) REFERENCES public."user"(id);
+ALTER TABLE ONLY public.thread
+    ADD CONSTRAINT author_fkey FOREIGN KEY (author) REFERENCES public."user"(nickname);
 
 
 --
--- Name: post post_forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+-- Name: post author_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.post
-    ADD CONSTRAINT post_forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(id);
+    ADD CONSTRAINT author_fkey FOREIGN KEY (author) REFERENCES public."user"(nickname);
+
+
+--
+-- Name: thread forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.thread
+    ADD CONSTRAINT forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(slug);
+
+
+--
+-- Name: post forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.post
+    ADD CONSTRAINT forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(slug);
+
+
+--
+-- Name: forum_user forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.forum_user
+    ADD CONSTRAINT forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(slug);
 
 
 --
@@ -521,19 +639,19 @@ ALTER TABLE ONLY public.post
 
 
 --
--- Name: thread thread_author_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+-- Name: forum user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.thread
-    ADD CONSTRAINT thread_author_fkey FOREIGN KEY (author) REFERENCES public."user"(id);
+ALTER TABLE ONLY public.forum
+    ADD CONSTRAINT user_fkey FOREIGN KEY ("user") REFERENCES public."user"(nickname);
 
 
 --
--- Name: thread thread_forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+-- Name: forum_user user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
-ALTER TABLE ONLY public.thread
-    ADD CONSTRAINT thread_forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(id);
+ALTER TABLE ONLY public.forum_user
+    ADD CONSTRAINT user_fkey FOREIGN KEY ("user") REFERENCES public."user"(nickname);
 
 
 --

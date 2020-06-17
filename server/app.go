@@ -58,11 +58,6 @@ func NewApp() *App {
 }
 
 func initDB() *sql.DB {
-	//dbInfo := fmt.Sprintf("user=%s password=%s dbname=%s sslmode=disable",
-	//					  os.Getenv("FORUM_USER"),
-	//					  os.Getenv("FORUM_PASSWORD"),
-	//					  os.Getenv("FORUM_DBNAME"))
-
 	dbInfo := fmt.Sprintf("postgres://%s:%s@localhost/%s?sslmode=disable",
 		os.Getenv("FORUM_USER"),
 		os.Getenv("FORUM_PASSWORD"),
