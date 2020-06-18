@@ -2,6 +2,7 @@ package threadPostgres
 
 import (
 	"database/sql"
+	"fmt"
 	"forum/models"
 	_thread "forum/thread"
 	"strconv"
@@ -31,20 +32,28 @@ func (r *repository) CreateThread(newThread *models.Thread) (thread models.Threa
 		return thread, _thread.UserOrForumNotFound
 	}
 
+	if newThread.Slug != "" {
+		thread, err = r.GetThreadBySlug(newThread.Slug)
+		fmt.Println(err)
+		if err == nil {
+			return thread, _thread.AlreadyExists
+		}
+	}
+
 	createThread := `
 		INSERT INTO thread (author, created, forum, message, slug, title)
 		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
 	err = r.db.QueryRow(createThread, authorNickname, newThread.Created, forumSlug, newThread.Message, newThread.Slug, newThread.Title).
 		Scan(&newThread.ID)
 
-	if err != nil {
-		thread, err = r.GetThreadBySlug(newThread.Slug)
-		if err != nil {
-			return thread, err
-		}
-
-		return thread, _thread.AlreadyExists
-	}
+	//if err != nil {
+	//	thread, err = r.GetThreadBySlug(newThread.Slug)
+	//	if err != nil {
+	//		return thread, err
+	//	}
+	//
+	//	return thread, _thread.AlreadyExists
+	//}
 
 	thread, err = r.GetThreadByID(newThread.ID)
 	if err != nil {
@@ -120,9 +129,9 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 
 func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
-		FROM thread t
-		WHERE t.id = $1`
+		SELECT id, author, created, message, slug, title, forum, votes
+		FROM thread
+		WHERE id = $1`
 	if err = r.db.QueryRow(getThread, id).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
 			&thread.Votes); err != nil {
@@ -134,9 +143,9 @@ func (r *repository) GetThreadByID(id uint64) (thread models.Thread, err error) 
 
 func (r *repository) GetThreadBySlug(slug string) (thread models.Thread, err error) {
 	getThread := `
-		SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
-		FROM thread t
-		WHERE LOWER(t.slug) = LOWER($1)`
+		SELECT id, author, created, message, slug, title, forum, votes
+		FROM thread
+		WHERE slug = $1`
 	if err = r.db.QueryRow(getThread, slug).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
 			&thread.Votes); err != nil {

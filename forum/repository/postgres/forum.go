@@ -58,8 +58,8 @@ func (r *repository) CreateForum(newForum *models.Forum) (forum models.Forum, er
 func (r *repository) GetForum(slug string) (forum models.Forum, err error) {
 	getForum := `
 		SELECT title, "user", slug, posts, threads
-		FROM forum f
-		WHERE LOWER(f.slug) = LOWER($1)`
+		FROM forum
+		WHERE slug = $1`
 	err = r.db.QueryRow(getForum, slug).Scan(&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
 	if err != nil {
 		return forum, _forum.ErrNotFound

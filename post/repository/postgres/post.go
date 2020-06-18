@@ -9,6 +9,7 @@ import (
 	"forum/utils"
 	"github.com/lib/pq"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -153,10 +154,21 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 		return posts, err
 	}
 	if !isID {
-		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
+		getThreadID := `SELECT id FROM thread WHERE slug = $1`
 		if err = r.db.QueryRow(getThreadID, threadSlugOrID).Scan(&threadID); err != nil {
+			fmt.Println(err.Error())
 			return posts, _post.ThreadNotFound
 		}
+	}
+
+	if len(newPosts) == 0 {
+		return []models.Post{}, err
+	}
+
+	var forumSlug string
+	err = r.db.QueryRow(`SELECT forum FROM thread WHERE id = $1`, threadID).Scan(&forumSlug)
+	if err != nil {
+		return posts, errors.New("can't find forum, error: " + err.Error())
 	}
 
 	if len(newPosts) == 0 {
@@ -180,20 +192,14 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 			}
 		}
 
-		var authorNickname string
-		err = r.db.QueryRow(`SELECT nickname FROM "user" WHERE LOWER(nickname) = LOWER($1)`, newPost.Author).Scan(&authorNickname)
+		var userNickname string
+		err = r.db.QueryRow(`SELECT nickname FROM "user" WHERE nickname = $1`, newPost.Author).Scan(&userNickname)
 		if err != nil {
 			return posts, _post.NotFound
 		}
 
-		var forumSlug string
-		err = r.db.QueryRow(`SELECT forum FROM thread WHERE id = $1`, threadID).Scan(&forumSlug)
-		if err != nil {
-			return posts, errors.New("can't find forum, error: " + err.Error())
-		}
-
 		createPost += " (?, ?, ?, ?, ?, ?, ?),"
-		vals = append(vals, authorNickname, now, forumSlug, false, newPost.Message, newPost.Parent, newPost.Thread)
+		vals = append(vals, userNickname, now, forumSlug, false, newPost.Message, newPost.Parent, newPost.Thread)
 	}
 
 	createPost = createPost[0 : len(createPost)-1]
@@ -206,7 +212,7 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	}
 	idRows, err := statement.Query(vals...)
 	if err != nil {
-		return posts, errors.New("idRows error: " + err.Error())
+		return posts, _post.NotFound
 	}
 
 	var ids []uint64
@@ -307,14 +313,6 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 }
 
 func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
-	var tree, leftKey uint64
-	if since != 0 {
-		err = r.db.QueryRow(`SELECT tree, left_key FROM post WHERE id = $1`, since).Scan(&tree, &leftKey)
-		if err != nil {
-			return posts, err
-		}
-	}
-
 	getPosts := `
 		SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent
 		FROM post p
@@ -322,14 +320,14 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 
 	if !desc {
 		if since != 0 {
-			getPosts += ` AND ((p.tree = $2 AND p.left_key > $3) OR (p.tree > $2))`
+			getPosts += ` AND path > (SELECT path FROM post WHERE id = $2)`
 		}
-		getPosts += ` ORDER BY p.tree, p.left_key`
+		getPosts += ` ORDER BY path`
 	} else {
 		if since != 0 {
-			getPosts += ` AND ((p.tree = $2 AND p.left_key < $3) OR (p.tree < $2))`
+			getPosts += ` AND path < (SELECT path FROM post WHERE id = $2)`
 		}
-		getPosts += ` ORDER BY p.tree DESC, p.left_key DESC`
+		getPosts += ` ORDER BY path DESC`
 	}
 
 	if limit != 0 {
@@ -338,17 +336,17 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 
 	var startsWith uint64 = 2
 	if since != 0 {
-		startsWith = 4
+		startsWith = 3
 	}
 	getPosts = utils.ReplaceSQL(getPosts, "?", startsWith)
 
 	var rows *sql.Rows
 	switch true {
 	case since != 0 && limit != 0:
-		rows, err = r.db.Query(getPosts, threadID, tree, leftKey, limit)
+		rows, err = r.db.Query(getPosts, threadID, since, limit)
 		break
 	case since != 0:
-		rows, err = r.db.Query(getPosts, threadID, tree, leftKey)
+		rows, err = r.db.Query(getPosts, threadID, since)
 		break
 	case limit != 0:
 		rows, err = r.db.Query(getPosts, threadID, limit)
@@ -380,98 +378,46 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 }
 
 func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
-	var tree uint64
-	if since != 0 {
-		err = r.db.QueryRow(`SELECT tree FROM post WHERE id = $1`, since).Scan(&tree)
-		if err != nil {
-			return posts, err
-		}
-	}
-
-	getTrees := `
-		SELECT tree
-		FROM post
-		WHERE thread = $1 AND parent = 0`
-
-	if since != 0 {
-		if !desc {
-			getTrees += `
-				AND tree > $2
-				ORDER BY tree`
-		} else {
-			getTrees += `
-				AND tree < $2
-				ORDER BY tree DESC`
-		}
-		getTrees += ` LIMIT $3`
-	} else {
-		if !desc {
-			getTrees += `
-				ORDER BY tree
-				LIMIT $2`
-		} else {
-			getTrees += `
-				ORDER BY tree DESC
-				LIMIT $2`
-		}
-	}
-
-	var idRows *sql.Rows
-	if since != 0 {
-		if limit != 0 {
-			idRows, err = r.db.Query(getTrees, threadID, tree, limit)
-		} else {
-			idRows, err = r.db.Query(getTrees, threadID, tree)
-		}
-	} else {
-		if limit != 0 {
-			idRows, err = r.db.Query(getTrees, threadID, limit)
-		} else {
-			idRows, err = r.db.Query(getTrees, threadID)
-		}
-	}
-	if err != nil {
-		return posts, err
-	}
-	defer idRows.Close()
-
-	var ids []uint64
-	var firstTree, secondTree uint64
-
-	for idRows.Next() {
-		var id uint64
-
-		err = idRows.Scan(&id)
-		if err != nil {
-			return posts, err
-		}
-
-		ids = append(ids, id)
-	}
-
-	if len(ids) > 0 {
-		firstTree = ids[0]
-		secondTree = ids[len(ids)-1]
-	}
-
-	if firstTree > secondTree {
-		firstTree, secondTree = secondTree, firstTree
-	}
-
 	getPosts := `
-		SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent
-		FROM post p
-		WHERE p.thread = $1 AND p.tree >= $2 AND p.tree <= $3`
+		SELECT id, author, created, forum, is_edited, message, parent
+		FROM post
+		WHERE thread = $1 AND path && (
+			SELECT ARRAY (
+				SELECT id
+				FROM post
+				WHERE thread = $1 AND parent = 0 since
+				ORDER BY id desc
+				limit
+			)
+		)
+		ORDER BY path[1] desc, path`
+
+	if since != 0 {
+		if !desc {
+			getPosts = strings.Replace(getPosts, "since", "AND path > (SELECT path[1:1] FROM post WHERE id = $2)", 1)
+		} else {
+			getPosts = strings.Replace(getPosts, "since", "AND path < (SELECT path[1:1] FROM post WHERE id = $2)", 1)
+		}
+	} else {
+		getPosts = strings.Replace(getPosts, "since", "", 1)
+	}
 
 	if !desc {
-		getPosts += ` ORDER BY tree, left_key`
-	} else {
-		getPosts += ` ORDER BY p.tree DESC, p.left_key`
+		getPosts = strings.Replace(getPosts, "desc", "", 2)
 	}
 
-	fmt.Println(getPosts)
+	if limit != 0 {
+		getPosts = strings.Replace(getPosts, "limit", "LIMIT " + strconv.Itoa(int(limit)), 1)
+	} else {
+		getPosts = strings.Replace(getPosts, "limit", "", 1)
+	}
 
-	rows, err := r.db.Query(getPosts, threadID, firstTree, secondTree)
+	var rows *sql.Rows
+	if since != 0 {
+		rows, err = r.db.Query(getPosts, threadID, since)
+	} else {
+		rows, err = r.db.Query(getPosts, threadID)
+	}
 	if err != nil {
 		return posts, err
 	}

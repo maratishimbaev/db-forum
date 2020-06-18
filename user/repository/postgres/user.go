@@ -24,7 +24,7 @@ func (r *repository) CreateUser(newUser *models.User) (users []models.User, err 
 	if err != nil {
 		getUsers := `
 			SELECT about, email ,fullname, nickname
-			FROM "user" WHERE LOWER(nickname) = LOWER($1) OR LOWER(email) = LOWER($2)`
+			FROM "user" WHERE nickname = $1 OR email = $2`
 		rows, err := r.db.Query(getUsers, newUser.Nickname, newUser.Email)
 		if err != nil {
 			return users, err
@@ -177,7 +177,6 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 
 		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 		if err != nil {
-			fmt.Println(err.Error())
 			return users, fmt.Errorf("error: %w, forum slug: %s", _user.ErrForumNotFound, forumSlug)
 		}
 

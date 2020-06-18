@@ -16,6 +16,20 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: citext; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION citext; Type: COMMENT; Schema: -; Owner:
+--
+
+COMMENT ON EXTENSION citext IS 'data type for case-insensitive character strings';
+
+
+--
 -- Name: ltree; Type: EXTENSION; Schema: -; Owner: -
 --
 
@@ -30,46 +44,24 @@ COMMENT ON EXTENSION ltree IS 'data type for hierarchical tree-like structures';
 
 
 --
--- Name: post_before_insert_func(); Type: FUNCTION; Schema: public; Owner: postgres
+-- Name: post_add_path_func(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
-CREATE FUNCTION public.post_before_insert_func() RETURNS trigger
+CREATE FUNCTION public.post_add_path_func() RETURNS trigger
     LANGUAGE plpgsql
 AS $$
-declare
-    _left_key integer;
-    _right_key integer;
-    _tree integer;
 begin
-    if new.parent = 0 then
-        new.left_key := 1;
-        new.right_key := 2;
-        new.tree := nextval('tree');
+    if (new.parent = 0) then
+        update post set path = ARRAY[new.id] where id = new.id;
     else
-        select left_key, right_key, tree
-        into _left_key, _right_key, _tree
-        from post
-        where id = new.parent;
-
-        update post
-        set left_key = left_key + 2
-        where left_key > _right_key and tree = _tree;
-
-        update post
-        set right_key = right_key + 2
-        where right_key >= _right_key and tree = _tree;
-
-        new.left_key := _right_key;
-        new.right_key := _right_key + 1;
-        new.tree := _tree;
+        update post set path = (select path from post where id = new.parent) || new.id where id = new.id;
     end if;
-
     return new;
 end
 $$;
 
 
-ALTER FUNCTION public.post_before_insert_func() OWNER TO postgres;
+ALTER FUNCTION public.post_add_path_func() OWNER TO postgres;
 
 --
 -- Name: post_user_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -188,11 +180,11 @@ SET default_table_access_method = heap;
 
 CREATE TABLE public.forum (
                               id integer NOT NULL,
-                              slug character varying(256) NOT NULL,
                               title character varying(256) NOT NULL,
                               posts integer DEFAULT 0,
                               threads integer DEFAULT 0,
-                              "user" character varying(64) NOT NULL
+                              "user" public.citext NOT NULL,
+                              slug public.citext NOT NULL
 );
 
 
@@ -225,8 +217,8 @@ ALTER SEQUENCE public.forum_id_seq OWNED BY public.forum.id;
 --
 
 CREATE TABLE public.forum_user (
-                                   forum character varying(256) NOT NULL,
-                                   "user" character varying(64) NOT NULL
+                                   "user" public.citext NOT NULL,
+                                   forum public.citext NOT NULL
 );
 
 
@@ -243,11 +235,9 @@ CREATE TABLE public.post (
                              message text NOT NULL,
                              thread integer,
                              parent integer,
-                             left_key integer NOT NULL,
-                             right_key integer NOT NULL,
-                             tree integer NOT NULL,
-                             forum character varying(256) NOT NULL,
-                             author character varying(64) NOT NULL
+                             author public.citext NOT NULL,
+                             path integer[],
+                             forum public.citext NOT NULL
 );
 
 
@@ -283,11 +273,11 @@ CREATE TABLE public.thread (
                                id integer NOT NULL,
                                created timestamp with time zone,
                                message text NOT NULL,
-                               slug character varying(256),
                                title character varying(128) NOT NULL,
                                votes integer DEFAULT 0,
-                               author character varying(64) NOT NULL,
-                               forum character varying(256) NOT NULL
+                               author public.citext NOT NULL,
+                               forum public.citext NOT NULL,
+                               slug public.citext
 );
 
 
@@ -336,9 +326,9 @@ ALTER TABLE public.tree OWNER TO postgres;
 CREATE TABLE public."user" (
                                id integer NOT NULL,
                                about text,
-                               email character varying(256) NOT NULL,
                                fullname character varying(128) NOT NULL,
-                               nickname character varying(64)
+                               nickname public.citext NOT NULL,
+                               email public.citext NOT NULL
 );
 
 
@@ -416,35 +406,11 @@ ALTER TABLE ONLY public.forum
 
 
 --
--- Name: forum_user forum_user_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.forum_user
-    ADD CONSTRAINT forum_user_unique UNIQUE (forum, "user");
-
-
---
--- Name: user nickname_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public."user"
-    ADD CONSTRAINT nickname_unique UNIQUE (nickname);
-
-
---
 -- Name: post post_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.post
     ADD CONSTRAINT post_pkey PRIMARY KEY (id);
-
-
---
--- Name: forum slug_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.forum
-    ADD CONSTRAINT slug_unique UNIQUE (slug);
 
 
 --
@@ -472,17 +438,17 @@ ALTER TABLE ONLY public."user"
 
 
 --
--- Name: forum_lower_slug_key; Type: INDEX; Schema: public; Owner: postgres
+-- Name: forum_slug_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE UNIQUE INDEX forum_lower_slug_key ON public.forum USING btree (lower((slug)::text));
+CREATE UNIQUE INDEX forum_slug_idx ON public.forum USING btree (slug);
 
 
 --
 -- Name: forum_user_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE UNIQUE INDEX forum_user_idx ON public.forum_user USING btree (forum, "user");
+CREATE UNIQUE INDEX forum_user_idx ON public.forum USING btree ("user");
 
 
 --
@@ -493,52 +459,82 @@ CREATE INDEX index_vote_thread_user ON public.vote USING btree (thread, "user");
 
 
 --
--- Name: post_left_key_idx; Type: INDEX; Schema: public; Owner: postgres
+-- Name: post_created_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE INDEX post_left_key_idx ON public.post USING btree (left_key);
-
-
---
--- Name: post_right_key_idx; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE INDEX post_right_key_idx ON public.post USING btree (right_key);
+CREATE INDEX post_created_idx ON public.post USING btree (created);
 
 
 --
--- Name: post_tree_left_key_idx; Type: INDEX; Schema: public; Owner: postgres
+-- Name: post_parent_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE INDEX post_tree_left_key_idx ON public.post USING btree (tree, left_key);
-
-
---
--- Name: thread_lower_slug_key; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE UNIQUE INDEX thread_lower_slug_key ON public.thread USING btree (lower((slug)::text)) WHERE ((slug IS NOT NULL) AND ((slug)::text <> ''::text));
+CREATE INDEX post_parent_idx ON public.post USING btree (parent);
 
 
 --
--- Name: user_lower_email_key; Type: INDEX; Schema: public; Owner: postgres
+-- Name: post_path_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE UNIQUE INDEX user_lower_email_key ON public."user" USING btree (lower((email)::text));
-
-
---
--- Name: user_lower_idx; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE INDEX user_lower_idx ON public."user" USING btree (lower((nickname)::text) COLLATE "C");
+CREATE INDEX post_path_idx ON public.post USING gin (path);
 
 
 --
--- Name: user_lower_nickname_key; Type: INDEX; Schema: public; Owner: postgres
+-- Name: post_thread_and_id_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE UNIQUE INDEX user_lower_nickname_key ON public."user" USING btree (lower((nickname)::text));
+CREATE INDEX post_thread_and_id_idx ON public.post USING btree (thread, id);
+
+ALTER TABLE public.post CLUSTER ON post_thread_and_id_idx;
+
+
+--
+-- Name: post_thread_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX post_thread_idx ON public.post USING btree (thread);
+
+
+--
+-- Name: thread_created_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX thread_created_idx ON public.thread USING btree (created);
+
+
+--
+-- Name: thread_forum_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX thread_forum_idx ON public.thread USING btree (forum);
+
+
+--
+-- Name: thread_slug_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX thread_slug_idx ON public.thread USING btree (slug);
+
+
+--
+-- Name: user_email_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX user_email_idx ON public."user" USING btree (email);
+
+
+--
+-- Name: user_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX user_idx ON public."user" USING btree (nickname, email, about, fullname);
+
+
+--
+-- Name: user_nickname_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX user_nickname_idx ON public."user" USING btree (nickname);
 
 
 --
@@ -549,10 +545,10 @@ CREATE UNIQUE INDEX vote_user_and_thread_key ON public.vote USING btree ("user",
 
 
 --
--- Name: post post_before_insert; Type: TRIGGER; Schema: public; Owner: postgres
+-- Name: post post_add_path; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
-CREATE TRIGGER post_before_insert BEFORE INSERT ON public.post FOR EACH ROW EXECUTE PROCEDURE public.post_before_insert_func();
+CREATE TRIGGER post_add_path AFTER INSERT ON public.post FOR EACH ROW EXECUTE PROCEDURE public.post_add_path_func();
 
 
 --
@@ -591,22 +587,6 @@ CREATE TRIGGER votes_add AFTER INSERT OR UPDATE ON public.vote FOR EACH ROW EXEC
 
 
 --
--- Name: thread author_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.thread
-    ADD CONSTRAINT author_fkey FOREIGN KEY (author) REFERENCES public."user"(nickname);
-
-
---
--- Name: post author_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.post
-    ADD CONSTRAINT author_fkey FOREIGN KEY (author) REFERENCES public."user"(nickname);
-
-
---
 -- Name: thread forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -636,22 +616,6 @@ ALTER TABLE ONLY public.forum_user
 
 ALTER TABLE ONLY public.post
     ADD CONSTRAINT post_thread_fkey FOREIGN KEY (thread) REFERENCES public.thread(id);
-
-
---
--- Name: forum user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.forum
-    ADD CONSTRAINT user_fkey FOREIGN KEY ("user") REFERENCES public."user"(nickname);
-
-
---
--- Name: forum_user user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.forum_user
-    ADD CONSTRAINT user_fkey FOREIGN KEY ("user") REFERENCES public."user"(nickname);
 
 
 --
