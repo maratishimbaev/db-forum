@@ -72,7 +72,10 @@ CREATE FUNCTION public.post_user_add_func() RETURNS trigger
 AS $$
 begin
     insert into forum_user (forum, "user")
-    values (new.forum, new.author)
+    values (
+               (select id from forum where slug = new.forum),
+               (select id from "user" where nickname = new.author)
+           )
     on conflict do nothing;
 
     return new;
@@ -113,7 +116,10 @@ CREATE FUNCTION public.thread_user_add_func() RETURNS trigger
 AS $$
 begin
     insert into forum_user (forum, "user")
-    values (new.forum, new.author)
+    values (
+               (select id from forum where slug = new.forum),
+               (select id from "user" where nickname = new.author)
+           )
     on conflict do nothing;
 
     return new;
@@ -217,8 +223,8 @@ ALTER SEQUENCE public.forum_id_seq OWNED BY public.forum.id;
 --
 
 CREATE TABLE public.forum_user (
-                                   "user" public.citext NOT NULL,
-                                   forum public.citext NOT NULL
+                                   "user" integer NOT NULL,
+                                   forum integer NOT NULL
 );
 
 
@@ -327,8 +333,8 @@ CREATE TABLE public."user" (
                                id integer NOT NULL,
                                about text,
                                fullname character varying(128) NOT NULL,
-                               nickname public.citext NOT NULL,
-                               email public.citext NOT NULL
+                               email public.citext NOT NULL,
+                               nickname public.citext NOT NULL COLLATE pg_catalog."C"
 );
 
 
@@ -599,14 +605,6 @@ ALTER TABLE ONLY public.thread
 --
 
 ALTER TABLE ONLY public.post
-    ADD CONSTRAINT forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(slug);
-
-
---
--- Name: forum_user forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.forum_user
     ADD CONSTRAINT forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(slug);
 
 

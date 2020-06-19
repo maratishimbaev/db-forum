@@ -46,15 +46,6 @@ func (r *repository) CreateThread(newThread *models.Thread) (thread models.Threa
 	err = r.db.QueryRow(createThread, authorNickname, newThread.Created, forumSlug, newThread.Message, newThread.Slug, newThread.Title).
 		Scan(&newThread.ID)
 
-	//if err != nil {
-	//	thread, err = r.GetThreadBySlug(newThread.Slug)
-	//	if err != nil {
-	//		return thread, err
-	//	}
-	//
-	//	return thread, _thread.AlreadyExists
-	//}
-
 	thread, err = r.GetThreadByID(newThread.ID)
 	if err != nil {
 		return thread, err

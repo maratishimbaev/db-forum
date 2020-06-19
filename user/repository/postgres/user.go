@@ -114,37 +114,37 @@ func (r *repository) ChangeUser(newUser *models.User) (user models.User, err err
 }
 
 func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string, desc bool) (users []models.User, err error) {
-	var hasForum bool
+	var forumId uint64
 
-	checkForum := "SELECT EXISTS(SELECT 1 FROM forum WHERE LOWER(slug) = LOWER($1))"
-	err = r.db.QueryRow(checkForum, forumSlug).Scan(&hasForum)
-	if err != nil || !hasForum {
+	checkForum := "SELECT id FROM forum WHERE slug = $1"
+	err = r.db.QueryRow(checkForum, forumSlug).Scan(&forumId)
+	if err != nil || forumId == 0 {
 		return users, _user.ErrForumNotFound
 	}
 
 	getUsers := `
 		SELECT about, email, fullname, nickname
 		FROM "user"
-		WHERE nickname IN (
+		WHERE id IN (
 			SELECT "user"
 			FROM forum_user
-			WHERE LOWER(forum) = LOWER($1) since
-		)`
+			WHERE forum = $1
+		) since`
 
 	if !desc {
 		if since != "" {
-			getUsers = strings.Replace(getUsers, "since", `AND LOWER("user") > LOWER(?) COLLATE "C"`, 1)
+			getUsers = strings.Replace(getUsers, "since", `AND nickname > ?`, 1)
 		} else {
 			getUsers = strings.Replace(getUsers, "since", "", 1)
 		}
-		getUsers += ` ORDER BY LOWER(nickname) COLLATE "C"`
+		getUsers += ` ORDER BY nickname`
 	} else {
 		if since != "" {
-			getUsers = strings.Replace(getUsers, "since", `AND LOWER("user") < LOWER(?) COLLATE "C"`, 1)
+			getUsers = strings.Replace(getUsers, "since", `AND nickname < ?`, 1)
 		} else {
 			getUsers = strings.Replace(getUsers, "since", "", 1)
 		}
-		getUsers += ` ORDER BY LOWER(nickname) COLLATE "C" DESC`
+		getUsers += ` ORDER BY nickname DESC`
 	}
 
 	if limit != 0 {
@@ -156,16 +156,16 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	var rows *sql.Rows
 	switch true {
 	case since != "" && limit != 0:
-		rows, err = r.db.Query(getUsers, forumSlug, since, limit)
+		rows, err = r.db.Query(getUsers, forumId, since, limit)
 		break
 	case since != "":
-		rows, err = r.db.Query(getUsers, forumSlug, since)
+		rows, err = r.db.Query(getUsers, forumId, since)
 		break
 	case limit != 0:
-		rows, err = r.db.Query(getUsers, forumSlug, limit)
+		rows, err = r.db.Query(getUsers, forumId, limit)
 		break
 	default:
-		rows, err = r.db.Query(getUsers, forumSlug)
+		rows, err = r.db.Query(getUsers, forumId)
 	}
 	if err != nil {
 		return users, err

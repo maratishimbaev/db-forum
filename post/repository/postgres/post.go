@@ -3,11 +3,9 @@ package postPostgres
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"forum/models"
 	_post "forum/post"
 	"forum/utils"
-	"github.com/lib/pq"
 	"strconv"
 	"strings"
 	"time"
@@ -141,34 +139,17 @@ func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err er
 }
 
 func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
-	var threadID uint64
-	var isID bool
-
-	threadID, err = strconv.ParseUint(threadSlugOrID, 10, 64)
-	if err != nil {
-		threadID = 0
-	}
-
-	threadExists := `SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)`
-	if err = r.db.QueryRow(threadExists, threadID).Scan(&isID); err != nil {
-		return posts, err
-	}
-	if !isID {
-		getThreadID := `SELECT id FROM thread WHERE slug = $1`
-		if err = r.db.QueryRow(getThreadID, threadSlugOrID).Scan(&threadID); err != nil {
-			fmt.Println(err.Error())
-			return posts, _post.ThreadNotFound
-		}
-	}
-
-	if len(newPosts) == 0 {
-		return []models.Post{}, err
-	}
-
 	var forumSlug string
-	err = r.db.QueryRow(`SELECT forum FROM thread WHERE id = $1`, threadID).Scan(&forumSlug)
+
+	threadId, err := strconv.ParseUint(threadSlugOrID, 10, 64)
 	if err != nil {
-		return posts, errors.New("can't find forum, error: " + err.Error())
+		threadId = 0
+	}
+
+	getThread := `SELECT id, forum FROM thread WHERE id = $1 OR (slug <> '' AND slug = $2)`
+	err = r.db.QueryRow(getThread, threadId, threadSlugOrID).Scan(&threadId, &forumSlug)
+	if err != nil {
+		return posts, _post.ThreadNotFound
 	}
 
 	if len(newPosts) == 0 {
@@ -181,7 +162,7 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	var vals []interface{}
 
 	for _, newPost := range newPosts {
-		newPost.Thread = threadID
+		newPost.Thread = threadId
 
 		if newPost.Parent != 0 {
 			var parentThread uint64
@@ -203,36 +184,16 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	}
 
 	createPost = createPost[0 : len(createPost)-1]
-	createPost += ` RETURNING id`
+	createPost += ` RETURNING id, author, created, forum, is_edited, message, parent, thread`
 	createPost = utils.ReplaceSQL(createPost, "?", 1)
 
 	statement, err := r.db.Prepare(createPost)
 	if err != nil {
 		return posts, errors.New("statement error: " + err.Error())
 	}
-	idRows, err := statement.Query(vals...)
+	rows, err := statement.Query(vals...)
 	if err != nil {
 		return posts, _post.NotFound
-	}
-
-	var ids []uint64
-	for idRows.Next() {
-		var id uint64
-		err = idRows.Scan(&id)
-		if err != nil {
-			return posts, err
-		}
-		ids = append(ids, id)
-	}
-
-	getPosts := `
-		SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent, thread
-		FROM post p
-		WHERE p.id = ANY($1)
-		ORDER BY id`
-	rows, err := r.db.Query(getPosts, pq.Array(ids))
-	if err != nil {
-		return posts, errors.New("rows error: " + err.Error())
 	}
 
 	for rows.Next() {
