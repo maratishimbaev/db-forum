@@ -416,24 +416,10 @@ CREATE INDEX forum_user_forum_and_user_idx ON public.forum_user USING btree (for
 
 
 --
--- Name: forum_user_forum_idx; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE INDEX forum_user_forum_idx ON public.forum_user USING btree (forum);
-
-
---
 -- Name: forum_user_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE UNIQUE INDEX forum_user_idx ON public.forum USING btree ("user");
-
-
---
--- Name: forum_user_user_idx; Type: INDEX; Schema: public; Owner: postgres
---
-
-CREATE INDEX forum_user_user_idx ON public.forum_user USING btree ("user");
 
 
 --
