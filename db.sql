@@ -44,26 +44,6 @@ COMMENT ON EXTENSION ltree IS 'data type for hierarchical tree-like structures';
 
 
 --
--- Name: post_add_path_func(); Type: FUNCTION; Schema: public; Owner: postgres
---
-
-CREATE FUNCTION public.post_add_path_func() RETURNS trigger
-    LANGUAGE plpgsql
-AS $$
-begin
-    if (new.parent = 0) then
-        update post set path = ARRAY[new.id] where id = new.id;
-    else
-        update post set path = (select path from post where id = new.parent) || new.id where id = new.id;
-    end if;
-    return new;
-end
-$$;
-
-
-ALTER FUNCTION public.post_add_path_func() OWNER TO postgres;
-
---
 -- Name: post_user_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -84,28 +64,6 @@ $$;
 
 
 ALTER FUNCTION public.post_user_add_func() OWNER TO postgres;
-
---
--- Name: posts_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
---
-
-CREATE FUNCTION public.posts_add_func() RETURNS trigger
-    LANGUAGE plpgsql
-AS $$
-begin
-    if (tg_op = 'INSERT') then
-        update forum set posts = posts + 1 where slug = new.forum;
-        return new;
-    elsif (tg_op = 'DELETE') then
-        update forum set posts = posts - 1 where slug = old.forum;
-        return old;
-    end if;
-    return null;
-end
-$$;
-
-
-ALTER FUNCTION public.posts_add_func() OWNER TO postgres;
 
 --
 -- Name: thread_user_add_func(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -551,24 +509,10 @@ CREATE UNIQUE INDEX vote_user_and_thread_key ON public.vote USING btree ("user",
 
 
 --
--- Name: post post_add_path; Type: TRIGGER; Schema: public; Owner: postgres
---
-
-CREATE TRIGGER post_add_path AFTER INSERT ON public.post FOR EACH ROW EXECUTE PROCEDURE public.post_add_path_func();
-
-
---
 -- Name: post post_user_add; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
 CREATE TRIGGER post_user_add AFTER INSERT ON public.post FOR EACH ROW EXECUTE PROCEDURE public.post_user_add_func();
-
-
---
--- Name: post posts_add; Type: TRIGGER; Schema: public; Owner: postgres
---
-
-CREATE TRIGGER posts_add AFTER INSERT OR UPDATE ON public.post FOR EACH ROW EXECUTE PROCEDURE public.posts_add_func();
 
 
 --
@@ -598,22 +542,6 @@ CREATE TRIGGER votes_add AFTER INSERT OR UPDATE ON public.vote FOR EACH ROW EXEC
 
 ALTER TABLE ONLY public.thread
     ADD CONSTRAINT forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(slug);
-
-
---
--- Name: post forum_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.post
-    ADD CONSTRAINT forum_fkey FOREIGN KEY (forum) REFERENCES public.forum(slug);
-
-
---
--- Name: post post_thread_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
---
-
-ALTER TABLE ONLY public.post
-    ADD CONSTRAINT post_thread_fkey FOREIGN KEY (thread) REFERENCES public.thread(id);
 
 
 --

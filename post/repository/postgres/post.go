@@ -34,9 +34,9 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 	postFull.Post.ID = id
 
 	getPost := `
-		SELECT p.author, p.created, p.forum, p.is_edited, p.message, p.parent, p.thread
-		FROM post p
-		WHERE p.id = $1`
+		SELECT author, created, forum, is_edited, message, parent, thread
+		FROM post
+		WHERE id = $1`
 	if err = r.db.QueryRow(getPost, id).
 		Scan(&postFull.Post.Author, &postFull.Post.Created, &postFull.Post.Forum, &postFull.Post.IsEdited,
 			&postFull.Post.Message, &postFull.Post.Parent, &postFull.Post.Thread); err != nil {
@@ -49,7 +49,7 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 
 		getAuthor := `
 			SELECT about, email, fullname, nickname
-			FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+			FROM "user" WHERE nickname = $1`
 		if err = r.db.QueryRow(getAuthor, postFull.Post.Author).
 			Scan(&postFull.Author.About, &postFull.Author.Email, &postFull.Author.FullName,
 				&postFull.Author.Nickname); err != nil {
@@ -62,9 +62,9 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 		postFull.Forum = &models.Forum{}
 
 		getForum := `
-			SELECT f.slug, f.title, f.user, f.posts, f.threads
-			FROM forum f
-			WHERE LOWER(f.slug) = LOWER($1)`
+			SELECT slug, title, "user", posts, threads
+			FROM forum
+			WHERE slug = $1`
 		if err = r.db.QueryRow(getForum, postFull.Post.Forum).
 			Scan(&postFull.Forum.Slug, &postFull.Forum.Title, &postFull.Forum.User, &postFull.Forum.Posts,
 				&postFull.Forum.Threads); err != nil {
@@ -77,9 +77,9 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 		postFull.Thread = &models.Thread{}
 
 		getThread := `
-			SELECT t.id, t.author, t.created, t.forum, t.message, t.slug, t.title, t.votes
-			FROM thread t
-			WHERE t.id = $1`
+			SELECT id, author, created, forum, message, slug, title, votes
+			FROM thread
+			WHERE id = $1`
 		if err = r.db.QueryRow(getThread, postFull.Post.Thread).
 			Scan(&postFull.Thread.ID, &postFull.Thread.Author, &postFull.Thread.Created, &postFull.Thread.Forum,
 				&postFull.Thread.Message, &postFull.Thread.Slug, &postFull.Thread.Title, &postFull.Thread.Votes); err != nil {
@@ -139,6 +139,11 @@ func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err er
 }
 
 func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return posts, err
+	}
+
 	var forumSlug string
 
 	threadId, err := strconv.ParseUint(threadSlugOrID, 10, 64)
@@ -147,18 +152,20 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	}
 
 	getThread := `SELECT id, forum FROM thread WHERE id = $1 OR (slug <> '' AND slug = $2)`
-	err = r.db.QueryRow(getThread, threadId, threadSlugOrID).Scan(&threadId, &forumSlug)
+	err = tx.QueryRow(getThread, threadId, threadSlugOrID).Scan(&threadId, &forumSlug)
 	if err != nil {
+		_ = tx.Rollback()
 		return posts, _post.ThreadNotFound
 	}
 
 	if len(newPosts) == 0 {
+		_ = tx.Commit()
 		return []models.Post{}, err
 	}
 
 	now := time.Now()
 
-	createPost := `INSERT INTO post (author, created, forum, is_edited, message, parent, thread) VALUES`
+	createPost := `INSERT INTO post (id, author, created, forum, is_edited, message, parent, thread, path) VALUES`
 	var vals []interface{}
 
 	for _, newPost := range newPosts {
@@ -167,32 +174,37 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 		if newPost.Parent != 0 {
 			var parentThread uint64
 
-			err = r.db.QueryRow(`SELECT thread FROM post WHERE id = $1`, newPost.Parent).Scan(&parentThread)
+			err = tx.QueryRow(`SELECT thread FROM post WHERE id = $1`, newPost.Parent).Scan(&parentThread)
 			if err != nil || parentThread != newPost.Thread {
+				_ = tx.Rollback()
 				return posts, _post.ParentNotInThread
 			}
+			createPost += `
+				(nextval('post_id_seq'::regclass),
+				?, ?, ?, ?, ?, ?, ?,
+				(SELECT path FROM post WHERE id = ?) || currval(pg_get_serial_sequence('post', 'id'))::integer),`
+			vals = append(vals, newPost.Author, now, forumSlug, false, newPost.Message, newPost.Parent, newPost.Thread, newPost.Parent)
+		} else {
+			createPost += `
+				(nextval('post_id_seq'::regclass),
+				?, ?, ?, ?, ?, ?, ?,
+				ARRAY[currval(pg_get_serial_sequence('post', 'id'))::integer]),`
+			vals = append(vals, newPost.Author, now, forumSlug, false, newPost.Message, newPost.Parent, newPost.Thread)
 		}
-
-		var userNickname string
-		err = r.db.QueryRow(`SELECT nickname FROM "user" WHERE nickname = $1`, newPost.Author).Scan(&userNickname)
-		if err != nil {
-			return posts, _post.NotFound
-		}
-
-		createPost += " (?, ?, ?, ?, ?, ?, ?),"
-		vals = append(vals, userNickname, now, forumSlug, false, newPost.Message, newPost.Parent, newPost.Thread)
 	}
 
 	createPost = createPost[0 : len(createPost)-1]
 	createPost += ` RETURNING id, author, created, forum, is_edited, message, parent, thread`
 	createPost = utils.ReplaceSQL(createPost, "?", 1)
 
-	statement, err := r.db.Prepare(createPost)
+	statement, err := tx.Prepare(createPost)
 	if err != nil {
+		_ = tx.Rollback()
 		return posts, errors.New("statement error: " + err.Error())
 	}
 	rows, err := statement.Query(vals...)
 	if err != nil {
+		_ = tx.Rollback()
 		return posts, _post.NotFound
 	}
 
@@ -201,12 +213,20 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 
 		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread)
 		if err != nil {
+			_ = tx.Rollback()
 			return posts, err
 		}
 
 		posts = append(posts, post)
 	}
 
+	_, err = tx.Exec(`UPDATE forum SET posts = posts + $1 WHERE slug = $2`, len(posts), forumSlug)
+	if err != nil {
+		_ = tx.Rollback()
+		return posts, err
+	}
+
+	_ = tx.Commit()
 	return posts, err
 }
 
