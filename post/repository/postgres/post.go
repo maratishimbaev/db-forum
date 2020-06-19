@@ -295,9 +295,9 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 
 func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
 	getPosts := `
-		SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent
-		FROM post p
-		WHERE p.thread = $1`
+		SELECT id, author, created, forum, is_edited, message, parent
+		FROM post
+		WHERE thread = $1`
 
 	if !desc {
 		if since != 0 {

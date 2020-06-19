@@ -50,7 +50,7 @@ func (r *repository) CreateUser(newUser *models.User) (users []models.User, err 
 func (r *repository) GetUser(nickname string) (user models.User, err error) {
 	getUser := `
 		SELECT about, email, fullname, nickname
-		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+		FROM "user" WHERE nickname = $1`
 	err = r.db.QueryRow(getUser, nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 	if err != nil {
 		return user, fmt.Errorf("error: %w, nickname: %s", _user.ErrNotFound, nickname)

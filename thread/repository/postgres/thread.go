@@ -62,38 +62,39 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 		return threads, _thread.UserOrForumNotFound
 	}
 
-	var getThreads string
+	getThreads := `
+		SELECT id, author, created, message, slug, title, forum, votes
+		FROM thread
+		WHERE forum = $1`
 
 	if desc {
-		getThreads = `
-			SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
-			FROM thread t
-			WHERE LOWER(t.forum) = LOWER($1) AND t.created <= $2
-			ORDER BY t.created DESC`
-
-		if since == (time.Time{}) {
-			since = time.Now().AddDate(1000, 0, 0)
+		if since != (time.Time{}) {
+			getThreads += ` AND created <= $2`
 		}
+		getThreads += ` ORDER BY created DESC`
 	} else {
-		getThreads = `
-			SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
-			FROM thread t
-			WHERE LOWER(t.forum) = LOWER($1) AND t.created >= $2
-			ORDER BY t.created`
-
-		if since == (time.Time{}) {
-			since = time.Now().AddDate(-1000, 0, 0)
+		if since != (time.Time{}) {
+			getThreads += ` AND created >= $2`
 		}
+		getThreads += ` ORDER BY created`
 	}
 
 	var rows *sql.Rows
 
 	if limit == 0 {
-		rows, err = r.db.Query(getThreads, slug, since)
+		if since != (time.Time{}) {
+			rows, err = r.db.Query(getThreads, slug, since)
+		} else {
+			rows, err = r.db.Query(getThreads, slug)
+		}
 	} else {
-		getThreads = getThreads + " LIMIT $3"
-
-		rows, err = r.db.Query(getThreads, slug, since, limit)
+		if since != (time.Time{}) {
+			getThreads += `	LIMIT $3`
+			rows, err = r.db.Query(getThreads, slug, since, limit)
+		} else {
+			getThreads += `	LIMIT $2`
+			rows, err = r.db.Query(getThreads, slug, limit)
+		}
 	}
 	if err != nil {
 		return threads, err

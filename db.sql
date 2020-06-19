@@ -430,6 +430,13 @@ CREATE INDEX post_created_idx ON public.post USING btree (created);
 
 
 --
+-- Name: post_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX post_idx ON public.post USING btree (thread, id, author, created, forum, is_edited, message, parent);
+
+
+--
 -- Name: post_parent_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -467,10 +474,24 @@ CREATE INDEX thread_created_idx ON public.thread USING btree (created);
 
 
 --
+-- Name: thread_forum_and_created_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX thread_forum_and_created_idx ON public.thread USING btree (forum, created);
+
+
+--
 -- Name: thread_forum_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX thread_forum_idx ON public.thread USING btree (forum);
+
+
+--
+-- Name: thread_idx; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX thread_idx ON public.thread USING btree (forum, created, id, author, message, slug, title, forum, votes);
 
 
 --
