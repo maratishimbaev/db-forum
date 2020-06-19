@@ -409,10 +409,10 @@ CREATE UNIQUE INDEX forum_slug_idx ON public.forum USING btree (slug);
 
 
 --
--- Name: forum_user_forum_and_user_idx; Type: INDEX; Schema: public; Owner: postgres
+-- Name: forum_user_forum_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
-CREATE INDEX forum_user_forum_and_user_idx ON public.forum_user USING btree (forum, "user");
+CREATE INDEX forum_user_forum_idx ON public.forum_user USING btree (forum);
 
 
 --
