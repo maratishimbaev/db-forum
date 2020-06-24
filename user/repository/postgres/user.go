@@ -2,10 +2,9 @@ package userPostgres
 
 import (
 	"database/sql"
+	"fmt"
 	"forum/models"
 	_user "forum/user"
-	"forum/utils"
-	"strings"
 )
 
 type repository struct {
@@ -17,13 +16,10 @@ func NewUserRepository(db *sql.DB) *repository {
 }
 
 func (r *repository) CreateUser(newUser *models.User) (users []models.User, err error) {
-	createUser := `INSERT INTO "user" (about, email, fullname, nickname)
-				   VALUES ($1, $2, $3, $4)`
+	createUser := "INSERT INTO \"user\" (about, email, fullname, nickname) VALUES ($1, $2, $3, $4)"
 	_, err = r.db.Exec(createUser, newUser.About, newUser.Email, newUser.FullName, newUser.Nickname)
 	if err != nil {
-		getUsers := `
-			SELECT about, email ,fullname, nickname
-			FROM "user" WHERE nickname = $1 OR email = $2`
+		getUsers := "SELECT about, email ,fullname, nickname FROM \"user\" WHERE nickname = $1 OR email = $2"
 		rows, err := r.db.Query(getUsers, newUser.Nickname, newUser.Email)
 		if err != nil {
 			return users, err
@@ -49,9 +45,7 @@ func (r *repository) CreateUser(newUser *models.User) (users []models.User, err 
 func (r *repository) GetUser(nickname string) (*models.User, error) {
 	var user models.User
 
-	getUser := `
-		SELECT about, email, fullname, nickname
-		FROM "user" WHERE nickname = $1`
+	getUser := "SELECT about, email, fullname, nickname FROM \"user\" WHERE nickname = $1"
 	err := r.db.QueryRow(getUser, nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 	if err != nil {
 		return nil, _user.ErrNotFound
@@ -63,9 +57,7 @@ func (r *repository) GetUser(nickname string) (*models.User, error) {
 func (r *repository) ChangeUser(newUser *models.User) (*models.User, error) {
 	var oldUser models.User
 
-	getOldUser := `
-		SELECT about, email, fullname
-		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+	getOldUser := "SELECT about, email, fullname FROM \"user\" WHERE LOWER(nickname) = LOWER($1)"
 	err := r.db.QueryRow(getOldUser, newUser.Nickname).Scan(&oldUser.About, &oldUser.Email, &oldUser.FullName)
 	if err != nil {
 		return nil, _user.ErrNotFound
@@ -82,14 +74,12 @@ func (r *repository) ChangeUser(newUser *models.User) (*models.User, error) {
 			newUser.FullName = oldUser.FullName
 		}
 
-		changeUser := `UPDATE "user"
-				   SET about = $1, email = $2, fullname = $3
-				   WHERE LOWER(nickname) = LOWER($4)`
+		changeUser := "UPDATE \"user\" SET about = $1, email = $2, fullname = $3 WHERE LOWER(nickname) = LOWER($4)"
 		_, err = r.db.Exec(changeUser, newUser.About, newUser.Email, newUser.FullName, newUser.Nickname)
 		if err != nil {
 			var userCount uint64
 
-			getUserCount := `SELECT COUNT(*) FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+			getUserCount := "SELECT COUNT(*) FROM \"user\" WHERE LOWER(nickname) = LOWER($1)"
 			err = r.db.QueryRow(getUserCount, newUser.Nickname).Scan(&userCount)
 			if err != nil {
 				return nil, err
@@ -105,9 +95,7 @@ func (r *repository) ChangeUser(newUser *models.User) (*models.User, error) {
 
 	var user models.User
 
-	getUser := `
-		SELECT about, email, fullname, nickname
-		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+	getUser := "SELECT about, email, fullname, nickname FROM \"user\" WHERE LOWER(nickname) = LOWER($1)"
 	err = r.db.QueryRow(getUser, newUser.Nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 	if err != nil {
 		return nil, err
@@ -125,51 +113,28 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 		return nil, _user.ErrForumNotFound
 	}
 
-	getUsers := `
-		SELECT about, email, fullname, nickname
-		FROM "user"
-		WHERE id IN (
-			SELECT "user"
-			FROM forum_user
-			WHERE forum = $1
-		) since`
+	getUsers := "SELECT about, email, fullname, nickname FROM \"user\" " +
+		"WHERE id IN (SELECT \"user\" FROM forum_user WHERE forum = $1)"
 
-	if !desc {
-		if since != "" {
-			getUsers = strings.Replace(getUsers, "since", `AND nickname > ?`, 1)
-		} else {
-			getUsers = strings.Replace(getUsers, "since", "", 1)
+	if since != "" {
+		var strSign string
+		if strSign = ">"; desc {
+			strSign = "<"
 		}
-		getUsers += ` ORDER BY nickname`
-	} else {
-		if since != "" {
-			getUsers = strings.Replace(getUsers, "since", `AND nickname < ?`, 1)
-		} else {
-			getUsers = strings.Replace(getUsers, "since", "", 1)
-		}
-		getUsers += ` ORDER BY nickname DESC`
+		getUsers += fmt.Sprintf(" AND nickname %s '%s'", strSign, since)
 	}
+
+	var strDesc string
+	if desc {
+		strDesc = "DESC"
+	}
+	getUsers += fmt.Sprintf(" ORDER BY nickname %s", strDesc)
 
 	if limit != 0 {
-		getUsers += ` LIMIT ?`
+		getUsers += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	getUsers = utils.ReplaceSQL(getUsers, "?", 2)
-
-	var rows *sql.Rows
-	switch true {
-	case since != "" && limit != 0:
-		rows, err = r.db.Query(getUsers, forumId, since, limit)
-		break
-	case since != "":
-		rows, err = r.db.Query(getUsers, forumId, since)
-		break
-	case limit != 0:
-		rows, err = r.db.Query(getUsers, forumId, limit)
-		break
-	default:
-		rows, err = r.db.Query(getUsers, forumId)
-	}
+	rows, err := r.db.Query(getUsers, forumId)
 	if err != nil {
 		return nil, err
 	}

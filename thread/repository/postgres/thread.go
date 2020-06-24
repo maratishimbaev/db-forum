@@ -2,6 +2,7 @@ package threadPostgres
 
 import (
 	"database/sql"
+	"fmt"
 	"forum/models"
 	_thread "forum/thread"
 	"strconv"
@@ -18,14 +19,14 @@ func NewThreadRepository(db *sql.DB) *repository {
 
 func (r *repository) CreateThread(newThread *models.Thread) (*models.Thread, error) {
 	var authorNickname string
-	getAuthorNickname := `SELECT nickname FROM "user" WHERE LOWER(nickname) = LOWER($1)`
+	getAuthorNickname := "SELECT nickname FROM \"user\" WHERE LOWER(nickname) = LOWER($1)"
 	err := r.db.QueryRow(getAuthorNickname, newThread.Author).Scan(&authorNickname)
 	if err != nil {
 		return nil, _thread.UserOrForumNotFound
 	}
 
 	var forumSlug string
-	getForumSlug := `SELECT slug FROM forum WHERE LOWER(slug) = LOWER($1)`
+	getForumSlug := "SELECT slug FROM forum WHERE LOWER(slug) = LOWER($1)"
 	err = r.db.QueryRow(getForumSlug, newThread.Forum).Scan(&forumSlug)
 	if err != nil {
 		return nil, _thread.UserOrForumNotFound
@@ -38,9 +39,8 @@ func (r *repository) CreateThread(newThread *models.Thread) (*models.Thread, err
 		}
 	}
 
-	createThread := `
-		INSERT INTO thread (author, created, forum, message, slug, title)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
+	createThread := "INSERT INTO thread (author, created, forum, message, slug, title)" +
+		"VALUES ($1, $2, $3, $4, $5, $6) RETURNING id"
 	err = r.db.QueryRow(createThread, authorNickname, newThread.Created, forumSlug, newThread.Message, newThread.Slug, newThread.Title).
 		Scan(&newThread.ID)
 
@@ -54,45 +54,37 @@ func (r *repository) CreateThread(newThread *models.Thread) (*models.Thread, err
 
 func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc bool) (threads []models.Thread, err error) {
 	var forumExists bool
-	checkForum := `SELECT EXISTS(SELECT 1 FROM forum WHERE LOWER(slug) = LOWER($1))`
+	checkForum := "SELECT EXISTS(SELECT 1 FROM forum WHERE LOWER(slug) = LOWER($1))"
 	err = r.db.QueryRow(checkForum, slug).Scan(&forumExists)
 	if err != nil || !forumExists {
 		return nil, _thread.UserOrForumNotFound
 	}
 
-	getThreads := `
-		SELECT id, author, created, message, slug, title, forum, votes
-		FROM thread
-		WHERE forum = $1`
+	getThreads := "SELECT id, author, created, message, slug, title, forum, votes FROM thread WHERE forum = $1"
 
+	if since != (time.Time{}) {
+		var strSign string
+		if strSign = ">="; desc {
+			strSign = "<="
+		}
+		getThreads += fmt.Sprintf(" AND created %s $2", strSign)
+	}
+
+	var strDesc string
 	if desc {
-		if since != (time.Time{}) {
-			getThreads += ` AND created <= $2`
-		}
-		getThreads += ` ORDER BY created DESC`
-	} else {
-		if since != (time.Time{}) {
-			getThreads += ` AND created >= $2`
-		}
-		getThreads += ` ORDER BY created`
+		strDesc = "DESC"
+	}
+	getThreads += fmt.Sprintf(" ORDER BY created %s", strDesc)
+
+	if limit != 0 {
+		getThreads += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
 	var rows *sql.Rows
-
-	if limit == 0 {
-		if since != (time.Time{}) {
-			rows, err = r.db.Query(getThreads, slug, since)
-		} else {
-			rows, err = r.db.Query(getThreads, slug)
-		}
+	if since != (time.Time{}) {
+		rows, err = r.db.Query(getThreads, slug, since)
 	} else {
-		if since != (time.Time{}) {
-			getThreads += `	LIMIT $3`
-			rows, err = r.db.Query(getThreads, slug, since, limit)
-		} else {
-			getThreads += `	LIMIT $2`
-			rows, err = r.db.Query(getThreads, slug, limit)
-		}
+		rows, err = r.db.Query(getThreads, slug)
 	}
 	if err != nil {
 		return nil, err
@@ -120,10 +112,7 @@ func (r *repository) GetThreads(slug string, limit uint64, since time.Time, desc
 func (r *repository) GetThreadByID(id uint64) (*models.Thread, error) {
 	var thread models.Thread
 
-	getThread := `
-		SELECT id, author, created, message, slug, title, forum, votes
-		FROM thread
-		WHERE id = $1`
+	getThread := "SELECT id, author, created, message, slug, title, forum, votes FROM thread WHERE id = $1"
 	if err := r.db.QueryRow(getThread, id).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
 			&thread.Votes); err != nil {
@@ -136,10 +125,7 @@ func (r *repository) GetThreadByID(id uint64) (*models.Thread, error) {
 func (r *repository) GetThreadBySlug(slug string) (*models.Thread, error) {
 	var thread models.Thread
 
-	getThread := `
-		SELECT id, author, created, message, slug, title, forum, votes
-		FROM thread
-		WHERE slug = $1`
+	getThread := "SELECT id, author, created, message, slug, title, forum, votes FROM thread WHERE slug = $1"
 	if err := r.db.QueryRow(getThread, slug).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
 			&thread.Votes); err != nil {
@@ -171,7 +157,7 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (*m
 	var threadID uint64
 
 	var isThreadID bool
-	checkThreadID := `SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)`
+	checkThreadID := "SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)"
 	err := r.db.QueryRow(checkThreadID, slugOrID).Scan(&isThreadID)
 
 	if isThreadID {
@@ -179,7 +165,7 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (*m
 			return nil, err
 		}
 	} else {
-		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
+		getThreadID := "SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)"
 		if err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
 			return nil, _thread.NotFound
 		}
@@ -187,7 +173,7 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (*m
 
 	var oldMessage, oldTitle string
 
-	getOldThread := `SELECT message, title FROM thread WHERE id = $1`
+	getOldThread := "SELECT message, title FROM thread WHERE id = $1"
 	err = r.db.QueryRow(getOldThread, threadID).Scan(&oldMessage, &oldTitle)
 	if err != nil {
 		return nil, err
@@ -201,19 +187,13 @@ func (r *repository) ChangeThread(slugOrID string, newThread *models.Thread) (*m
 			newThread.Title = oldTitle
 		}
 
-		changeThread := `
-			UPDATE thread
-			SET message = $1, title = $2
-			WHERE id = $3`
+		changeThread := "UPDATE thread SET message = $1, title = $2 WHERE id = $3"
 		_, err = r.db.Exec(changeThread, newThread.Message, newThread.Title, threadID)
 	}
 
 	var thread models.Thread
 
-	getThread := `
-		SELECT t.id, t.author, t.created, t.forum, t.message, t.slug, t.title
-		FROM thread t
-		WHERE t.id = $1`
+	getThread := "SELECT id, author, created, forum, message, slug, title FROM thread WHERE id = $1"
 	err = r.db.QueryRow(getThread, threadID).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Forum, &thread.Message, &thread.Slug, &thread.Title)
 
@@ -229,22 +209,20 @@ func (r *repository) VoteThread(slugOrID string, vote models.Vote) (*models.Thre
 		threadID = 0
 	}
 
-	threadExists := `SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)`
+	threadExists := "SELECT EXISTS(SELECT 1 FROM thread WHERE id = $1)"
 	if err = r.db.QueryRow(threadExists, threadID).Scan(&isID); err != nil {
 		return nil, err
 	}
 	if !isID {
-		getThreadID := `SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)`
+		getThreadID := "SELECT id FROM thread WHERE LOWER(slug) = LOWER($1)"
 		if err = r.db.QueryRow(getThreadID, slugOrID).Scan(&threadID); err != nil {
 			return nil, _thread.NotFound
 		}
 	}
 
-	createOrUpdateVote := `
-		INSERT INTO vote (voice, "user", thread)
-		SELECT $1, id, $3 FROM "user" WHERE LOWER(nickname) = LOWER($2)
-		ON CONFLICT ON CONSTRAINT unique_user_and_thread DO
-		UPDATE SET voice = $1`
+	createOrUpdateVote := "INSERT INTO vote (voice, \"user\", thread)" +
+		"SELECT $1, id, $3 FROM \"user\" WHERE LOWER(nickname) = LOWER($2)" +
+		"ON CONFLICT ON CONSTRAINT unique_user_and_thread DO UPDATE SET voice = $1"
 	res, err := r.db.Exec(createOrUpdateVote, vote.Voice, vote.Nickname, threadID)
 	if err != nil {
 		return nil, _thread.NotFound
@@ -256,10 +234,7 @@ func (r *repository) VoteThread(slugOrID string, vote models.Vote) (*models.Thre
 
 	var thread models.Thread
 
-	getThread := `
-		SELECT t.id, t.author, t.created, t.message, t.slug, t.title, t.forum, t.votes
-		FROM thread t
-		WHERE t.id = $1`
+	getThread := "SELECT id, author, created, message, slug, title, forum, votes FROM thread WHERE id = $1"
 	if err = r.db.QueryRow(getThread, threadID).
 		Scan(&thread.ID, &thread.Author, &thread.Created, &thread.Message, &thread.Slug, &thread.Title, &thread.Forum,
 			&thread.Votes); err != nil {
