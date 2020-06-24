@@ -13,11 +13,11 @@ func NewUseCase(repository post.Repository) *UseCase {
 	return &UseCase{repository: repository}
 }
 
-func (u *UseCase) GetPostFull(id uint64, related []string) (postFull models.PostFull, err error) {
+func (u *UseCase) GetPostFull(id uint64, related []string) (postFull *models.PostFull, err error) {
 	return u.repository.GetPostFull(id, related)
 }
 
-func (u *UseCase) ChangePost(newPost *models.Post) (post models.Post, err error) {
+func (u *UseCase) ChangePost(newPost *models.Post) (post *models.Post, err error) {
 	return u.repository.ChangePost(newPost)
 }
 

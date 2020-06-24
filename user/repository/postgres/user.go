@@ -2,7 +2,6 @@ package userPostgres
 
 import (
 	"database/sql"
-	"fmt"
 	"forum/models"
 	_user "forum/user"
 	"forum/utils"
@@ -44,30 +43,32 @@ func (r *repository) CreateUser(newUser *models.User) (users []models.User, err 
 
 	users = append(users, *newUser)
 
-	return users, err
+	return users, nil
 }
 
-func (r *repository) GetUser(nickname string) (user models.User, err error) {
+func (r *repository) GetUser(nickname string) (*models.User, error) {
+	var user models.User
+
 	getUser := `
 		SELECT about, email, fullname, nickname
 		FROM "user" WHERE nickname = $1`
-	err = r.db.QueryRow(getUser, nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
+	err := r.db.QueryRow(getUser, nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 	if err != nil {
-		return user, fmt.Errorf("error: %w, nickname: %s", _user.ErrNotFound, nickname)
+		return nil, _user.ErrNotFound
 	}
 
-	return user, err
+	return &user, nil
 }
 
-func (r *repository) ChangeUser(newUser *models.User) (user models.User, err error) {
+func (r *repository) ChangeUser(newUser *models.User) (*models.User, error) {
 	var oldUser models.User
 
 	getOldUser := `
 		SELECT about, email, fullname
 		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
-	err = r.db.QueryRow(getOldUser, newUser.Nickname).Scan(&oldUser.About, &oldUser.Email, &oldUser.FullName)
+	err := r.db.QueryRow(getOldUser, newUser.Nickname).Scan(&oldUser.About, &oldUser.Email, &oldUser.FullName)
 	if err != nil {
-		return user, fmt.Errorf("error: %w, nickname: %s", _user.ErrNotFound, newUser.Nickname)
+		return nil, _user.ErrNotFound
 	}
 
 	if !(newUser.About == "" && newUser.Email == "" && newUser.FullName == "") {
@@ -91,26 +92,28 @@ func (r *repository) ChangeUser(newUser *models.User) (user models.User, err err
 			getUserCount := `SELECT COUNT(*) FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 			err = r.db.QueryRow(getUserCount, newUser.Nickname).Scan(&userCount)
 			if err != nil {
-				return user, err
+				return nil, err
 			}
 
 			if userCount == 0 {
-				return user, fmt.Errorf("error: %w, nickname: %s", _user.ErrNotFound, newUser.Nickname)
+				return nil, _user.ErrNotFound
 			}
 
-			return user, _user.ErrConflictData
+			return nil, _user.ErrConflictData
 		}
 	}
+
+	var user models.User
 
 	getUser := `
 		SELECT about, email, fullname, nickname
 		FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 	err = r.db.QueryRow(getUser, newUser.Nickname).Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 	if err != nil {
-		return user, err
+		return nil, err
 	}
 
-	return user, err
+	return &user, nil
 }
 
 func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string, desc bool) (users []models.User, err error) {
@@ -119,7 +122,7 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 	checkForum := "SELECT id FROM forum WHERE slug = $1"
 	err = r.db.QueryRow(checkForum, forumSlug).Scan(&forumId)
 	if err != nil || forumId == 0 {
-		return users, _user.ErrForumNotFound
+		return nil, _user.ErrForumNotFound
 	}
 
 	getUsers := `
@@ -168,7 +171,7 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 		rows, err = r.db.Query(getUsers, forumId)
 	}
 	if err != nil {
-		return users, err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -177,15 +180,15 @@ func (r *repository) GetForumUsers(forumSlug string, limit uint64, since string,
 
 		err = rows.Scan(&user.About, &user.Email, &user.FullName, &user.Nickname)
 		if err != nil {
-			return users, fmt.Errorf("error: %w, forum slug: %s", _user.ErrForumNotFound, forumSlug)
+			return nil, _user.ErrForumNotFound
 		}
 
 		users = append(users, user)
 	}
 
 	if len(users) == 0 {
-		return []models.User{}, err
+		return []models.User{}, nil
 	}
 
-	return users, err
+	return users, nil
 }

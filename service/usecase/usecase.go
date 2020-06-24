@@ -17,6 +17,6 @@ func (u *UseCase) ClearDB() (err error) {
 	return u.repository.ClearDB()
 }
 
-func (u *UseCase) GetStatus() (status models.Status, err error) {
+func (u *UseCase) GetStatus() (status *models.Status, err error) {
 	return u.repository.GetStatus()
 }

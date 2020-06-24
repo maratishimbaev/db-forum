@@ -17,11 +17,11 @@ func (u *UseCase) CreateUser(newUser *models.User) (users []models.User, err err
 	return u.repository.CreateUser(newUser)
 }
 
-func (u *UseCase) GetUser(nickname string) (user models.User, err error) {
+func (u *UseCase) GetUser(nickname string) (user *models.User, err error) {
 	return u.repository.GetUser(nickname)
 }
 
-func (u *UseCase) ChangeUser(newUser *models.User) (user models.User, err error) {
+func (u *UseCase) ChangeUser(newUser *models.User) (user *models.User, err error) {
 	return u.repository.ChangeUser(newUser)
 }
 

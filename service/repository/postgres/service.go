@@ -63,33 +63,35 @@ func (r *Repository) ClearDB() (err error) {
 	}
 
 	err = tx.Commit()
-	return err
+	return nil
 }
 
-func (r *Repository) GetStatus() (status models.Status, err error) {
+func (r *Repository) GetStatus() (*models.Status, error) {
+	var status models.Status
+
 	countForum := `SELECT COUNT(*) FROM forum`
-	err = r.DB.QueryRow(countForum).Scan(&status.ForumCount)
+	err := r.DB.QueryRow(countForum).Scan(&status.ForumCount)
 	if err != nil {
-		return status, err
+		return nil, err
 	}
 
 	countPost := `SELECT COUNT(*) FROM post`
 	err = r.DB.QueryRow(countPost).Scan(&status.PostCount)
 	if err != nil {
-		return status, err
+		return nil, err
 	}
 
 	countThread := `SELECT COUNT(*) FROM thread`
 	err = r.DB.QueryRow(countThread).Scan(&status.ThreadCount)
 	if err != nil {
-		return status, err
+		return nil, err
 	}
 
 	countUser := `SELECT COUNT(*) FROM "user"`
 	err = r.DB.QueryRow(countUser).Scan(&status.UserCount)
 	if err != nil {
-		return status, err
+		return nil, err
 	}
 
-	return status, err
+	return &status, nil
 }

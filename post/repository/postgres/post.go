@@ -2,7 +2,6 @@ package postPostgres
 
 import (
 	"database/sql"
-	"errors"
 	"forum/models"
 	_post "forum/post"
 	"forum/utils"
@@ -30,17 +29,17 @@ func contains(slice []string, searchable string) bool {
 	return false
 }
 
-func (r *repository) GetPostFull(id uint64, related []string) (postFull models.PostFull, err error) {
-	postFull.Post.ID = id
+func (r *repository) GetPostFull(id uint64, related []string) (*models.PostFull, error) {
+	postFull := models.PostFull{Post: models.Post{ID: id}}
 
 	getPost := `
 		SELECT author, created, forum, is_edited, message, parent, thread
 		FROM post
 		WHERE id = $1`
-	if err = r.db.QueryRow(getPost, id).
+	if err := r.db.QueryRow(getPost, id).
 		Scan(&postFull.Post.Author, &postFull.Post.Created, &postFull.Post.Forum, &postFull.Post.IsEdited,
 			&postFull.Post.Message, &postFull.Post.Parent, &postFull.Post.Thread); err != nil {
-		return postFull, _post.NotFound
+		return nil, _post.NotFound
 	}
 
 	authorContains := contains(related, "user")
@@ -50,10 +49,10 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 		getAuthor := `
 			SELECT about, email, fullname, nickname
 			FROM "user" WHERE nickname = $1`
-		if err = r.db.QueryRow(getAuthor, postFull.Post.Author).
+		if err := r.db.QueryRow(getAuthor, postFull.Post.Author).
 			Scan(&postFull.Author.About, &postFull.Author.Email, &postFull.Author.FullName,
 				&postFull.Author.Nickname); err != nil {
-			return postFull, err
+			return nil, err
 		}
 	}
 
@@ -65,10 +64,10 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 			SELECT slug, title, "user", posts, threads
 			FROM forum
 			WHERE slug = $1`
-		if err = r.db.QueryRow(getForum, postFull.Post.Forum).
+		if err := r.db.QueryRow(getForum, postFull.Post.Forum).
 			Scan(&postFull.Forum.Slug, &postFull.Forum.Title, &postFull.Forum.User, &postFull.Forum.Posts,
 				&postFull.Forum.Threads); err != nil {
-			return postFull, err
+			return nil, err
 		}
 	}
 
@@ -80,39 +79,41 @@ func (r *repository) GetPostFull(id uint64, related []string) (postFull models.P
 			SELECT id, author, created, forum, message, slug, title, votes
 			FROM thread
 			WHERE id = $1`
-		if err = r.db.QueryRow(getThread, postFull.Post.Thread).
+		if err := r.db.QueryRow(getThread, postFull.Post.Thread).
 			Scan(&postFull.Thread.ID, &postFull.Thread.Author, &postFull.Thread.Created, &postFull.Thread.Forum,
 				&postFull.Thread.Message, &postFull.Thread.Slug, &postFull.Thread.Title, &postFull.Thread.Votes); err != nil {
-			return postFull, err
+			return nil, err
 		}
 	}
 
-	return postFull, err
+	return &postFull, nil
 }
 
-func (r *repository) ChangePost(newPost *models.Post) (post models.Post, err error) {
+func (r *repository) ChangePost(newPost *models.Post) (*models.Post, error) {
 	var hasPost bool
 
 	checkPost := `SELECT EXISTS(SELECT 1 FROM post WHERE id = $1)`
-	if err = r.db.QueryRow(checkPost, newPost.ID).Scan(&hasPost); err != nil || !hasPost {
-		return post, _post.NotFound
+	if err := r.db.QueryRow(checkPost, newPost.ID).Scan(&hasPost); err != nil || !hasPost {
+		return nil, _post.NotFound
 	}
 
 	getPostMessage := `SELECT message FROM post WHERE id = $1`
 
 	var oldPostMessage string
 
-	err = r.db.QueryRow(getPostMessage, newPost.ID).Scan(&oldPostMessage)
+	err := r.db.QueryRow(getPostMessage, newPost.ID).Scan(&oldPostMessage)
 	if err != nil {
-		return post, err
+		return nil, err
 	}
 
 	if oldPostMessage != newPost.Message && newPost.Message != "" {
 		changePost := `UPDATE post SET message = $1, is_edited = true WHERE id = $2`
 		if _, err = r.db.Exec(changePost, newPost.Message, newPost.ID); err != nil {
-			return post, _post.NotFound
+			return nil, _post.NotFound
 		}
 	}
+
+	var post models.Post
 
 	getPost := `
 		SELECT p.id, p.author, p.created, p.forum, p.is_edited, p.message, p.parent, p.thread
@@ -121,7 +122,7 @@ func (r *repository) ChangePost(newPost *models.Post) (post models.Post, err err
 	err = r.db.QueryRow(getPost, newPost.ID).
 		Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread)
 
-	return post, err
+	return &post, nil
 }
 
 func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err error) {
@@ -131,17 +132,17 @@ func (r *repository) GetThreadID(threadSlugOrID string) (threadID uint64, err er
 		getThreadIDBySlug := `SELECT id from thread WHERE LOWER(slug) = LOWER($1)`
 		err = r.db.QueryRow(getThreadIDBySlug, threadSlugOrID).Scan(&threadID)
 		if err != nil {
-			return threadID, _post.ThreadNotFound
+			return 0, _post.ThreadNotFound
 		}
 	}
 
-	return threadID, err
+	return threadID, nil
 }
 
 func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) (posts []models.Post, err error) {
 	tx, err := r.db.Begin()
 	if err != nil {
-		return posts, err
+		return nil, err
 	}
 
 	var forumSlug string
@@ -155,12 +156,12 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	err = tx.QueryRow(getThread, threadId, threadSlugOrID).Scan(&threadId, &forumSlug)
 	if err != nil {
 		_ = tx.Rollback()
-		return posts, _post.ThreadNotFound
+		return nil, _post.ThreadNotFound
 	}
 
 	if len(newPosts) == 0 {
 		_ = tx.Commit()
-		return []models.Post{}, err
+		return []models.Post{}, nil
 	}
 
 	now := time.Now()
@@ -177,7 +178,7 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 			err = tx.QueryRow(`SELECT thread FROM post WHERE id = $1`, newPost.Parent).Scan(&parentThread)
 			if err != nil || parentThread != newPost.Thread {
 				_ = tx.Rollback()
-				return posts, _post.ParentNotInThread
+				return nil, _post.ParentNotInThread
 			}
 			createPost += `
 				(nextval('post_id_seq'::regclass),
@@ -200,12 +201,12 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	statement, err := tx.Prepare(createPost)
 	if err != nil {
 		_ = tx.Rollback()
-		return posts, errors.New("statement error: " + err.Error())
+		return nil, err
 	}
 	rows, err := statement.Query(vals...)
 	if err != nil {
 		_ = tx.Rollback()
-		return posts, _post.NotFound
+		return nil, _post.NotFound
 	}
 
 	for rows.Next() {
@@ -214,7 +215,7 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent, &post.Thread)
 		if err != nil {
 			_ = tx.Rollback()
-			return posts, err
+			return nil, err
 		}
 
 		posts = append(posts, post)
@@ -223,11 +224,11 @@ func (r *repository) CreatePosts(threadSlugOrID string, newPosts []models.Post) 
 	_, err = tx.Exec(`UPDATE forum SET posts = posts + $1 WHERE slug = $2`, len(posts), forumSlug)
 	if err != nil {
 		_ = tx.Rollback()
-		return posts, err
+		return nil, err
 	}
 
 	_ = tx.Commit()
-	return posts, err
+	return posts, nil
 }
 
 func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
@@ -271,7 +272,7 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 	}
 
 	if err != nil {
-		return posts, err
+		return nil, err
 	}
 	defer parentRows.Close()
 
@@ -280,17 +281,17 @@ func (r *repository) GetFlatSortPosts(threadID, limit, since uint64, desc bool) 
 
 		err = parentRows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
 		if err != nil {
-			return posts, err
+			return nil, err
 		}
 
 		posts = append(posts, post)
 	}
 
 	if len(posts) == 0 {
-		return []models.Post{}, err
+		return []models.Post{}, nil
 	}
 
-	return posts, err
+	return posts, nil
 }
 
 func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
@@ -336,7 +337,7 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 		rows, err = r.db.Query(getPosts, threadID)
 	}
 	if err != nil {
-		return posts, err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -345,17 +346,17 @@ func (r *repository) GetTreeSortPosts(threadID, limit, since uint64, desc bool) 
 
 		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
 		if err != nil {
-			return posts, err
+			return nil, err
 		}
 
 		posts = append(posts, post)
 	}
 
 	if len(posts) == 0 {
-		return []models.Post{}, err
+		return []models.Post{}, nil
 	}
 
-	return posts, err
+	return posts, nil
 }
 
 func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc bool) (posts []models.Post, err error) {
@@ -388,7 +389,7 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 	}
 
 	if limit != 0 {
-		getPosts = strings.Replace(getPosts, "limit", "LIMIT " + strconv.Itoa(int(limit)), 1)
+		getPosts = strings.Replace(getPosts, "limit", "LIMIT "+strconv.Itoa(int(limit)), 1)
 	} else {
 		getPosts = strings.Replace(getPosts, "limit", "", 1)
 	}
@@ -400,7 +401,7 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 		rows, err = r.db.Query(getPosts, threadID)
 	}
 	if err != nil {
-		return posts, err
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -409,23 +410,23 @@ func (r *repository) GetParentTreeSortPosts(threadID, limit, since uint64, desc 
 
 		err = rows.Scan(&post.ID, &post.Author, &post.Created, &post.Forum, &post.IsEdited, &post.Message, &post.Parent)
 		if err != nil {
-			return posts, err
+			return nil, err
 		}
 
 		posts = append(posts, post)
 	}
 
 	if len(posts) == 0 {
-		return []models.Post{}, err
+		return []models.Post{}, nil
 	}
 
-	return posts, err
+	return posts, nil
 }
 
 func (r *repository) GetThreadPosts(threadSlugOrID string, limit, since uint64, sort string, desc bool) (posts []models.Post, err error) {
 	threadID, err := r.GetThreadID(threadSlugOrID)
 	if err != nil {
-		return posts, err
+		return nil, err
 	}
 
 	if sort == "tree" {

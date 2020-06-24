@@ -14,17 +14,17 @@ func NewForumRepository(db *sql.DB) *repository {
 	return &repository{db: db}
 }
 
-func (r *repository) CreateForum(newForum *models.Forum) (forum models.Forum, err error) {
+func (r *repository) CreateForum(newForum *models.Forum) (*models.Forum, error) {
 	var userNickname string
 	getUserNickname := `SELECT nickname FROM "user" WHERE LOWER(nickname) = LOWER($1)`
 	if err := r.db.QueryRow(getUserNickname, newForum.User).Scan(&userNickname); err != nil {
-		return forum, _forum.ErrUserNotFound
+		return nil, _forum.ErrUserNotFound
 	}
 
 	createForum := `
 		INSERT INTO forum (slug, title, "user")
 		VALUES ($1, $2, $3)`
-	_, err = r.db.Exec(createForum, newForum.Slug, newForum.Title, userNickname)
+	_, err := r.db.Exec(createForum, newForum.Slug, newForum.Title, userNickname)
 
 	if err != nil {
 		var hasUser bool
@@ -32,38 +32,40 @@ func (r *repository) CreateForum(newForum *models.Forum) (forum models.Forum, er
 		checkUser := `SELECT EXISTS(SELECT 1 FROM "user" WHERE LOWER(nickname) = LOWER($1))`
 		err = r.db.QueryRow(checkUser, newForum.User).Scan(&hasUser)
 		if err != nil {
-			return forum, err
+			return nil, err
 		}
 
 		if !hasUser {
-			return forum, _forum.ErrUserNotFound
+			return nil, _forum.ErrUserNotFound
 		} else {
-			forum, err = r.GetForum(newForum.Slug)
+			forum, err := r.GetForum(newForum.Slug)
 			if err != nil {
-				return forum, err
+				return nil, err
 			}
 
 			return forum, _forum.ErrAlreadyExists
 		}
 	}
 
-	forum, err = r.GetForum(newForum.Slug)
+	forum, err := r.GetForum(newForum.Slug)
 	if err != nil {
-		return forum, err
+		return nil, err
 	}
 
-	return forum, err
+	return forum, nil
 }
 
-func (r *repository) GetForum(slug string) (forum models.Forum, err error) {
+func (r *repository) GetForum(slug string) (*models.Forum, error) {
+	var forum models.Forum
+
 	getForum := `
 		SELECT title, "user", slug, posts, threads
 		FROM forum
 		WHERE slug = $1`
-	err = r.db.QueryRow(getForum, slug).Scan(&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
+	err := r.db.QueryRow(getForum, slug).Scan(&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
 	if err != nil {
-		return forum, _forum.ErrNotFound
+		return nil, _forum.ErrNotFound
 	}
 
-	return forum, err
+	return &forum, nil
 }
