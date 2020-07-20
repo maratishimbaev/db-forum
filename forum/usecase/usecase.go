@@ -13,10 +13,10 @@ func NewUseCase(repository forum.Repository) *UseCase {
 	return &UseCase{repository: repository}
 }
 
-func (u *UseCase) CreateForum(newForum *models.Forum) (forum models.Forum, err error) {
+func (u *UseCase) CreateForum(newForum *models.Forum) (forum *models.Forum, err error) {
 	return u.repository.CreateForum(newForum)
 }
 
-func (u *UseCase) GetForum(slug string) (forum models.Forum, err error) {
+func (u *UseCase) GetForum(slug string) (forum *models.Forum, err error) {
 	return u.repository.GetForum(slug)
 }

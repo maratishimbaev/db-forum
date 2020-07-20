@@ -5,7 +5,6 @@ import (
 	"forum/models"
 	_post "forum/post"
 	"github.com/labstack/echo"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -112,19 +111,16 @@ func (h *Handler) CreatePosts(c echo.Context) (err error) {
 func (h *Handler) GetThreadPosts(c echo.Context) (err error) {
 	limit, err := strconv.ParseUint(c.Request().URL.Query().Get("limit"), 10, 64)
 	if err != nil {
-		log.Printf("error: %s, limit: %d", err.Error(), limit)
 		limit = 0
 	}
 
 	since, err := strconv.ParseUint(c.Request().URL.Query().Get("since"), 10, 64)
 	if err != nil {
-		log.Printf("error: %s, since: %d", err.Error(), since)
 		since = 0
 	}
 
 	desc, err := strconv.ParseBool(c.Request().URL.Query().Get("desc"))
 	if err != nil {
-		log.Printf("error: %s, desc: %d", err.Error(), desc)
 		desc = false
 	}
 
